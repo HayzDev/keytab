@@ -1,0 +1,204 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>keytab</title>
+<style>
+  :root {
+    --card: rgba(22, 22, 26, 0.94);
+    --line: rgba(255, 255, 255, 0.07);
+    --text: #ececf1;
+    --muted: #8b8b96;
+    --key-bg: rgba(255, 255, 255, 0.06);
+    --accent: #8ab4ff;
+    --hover: rgba(255, 255, 255, 0.05);
+    --sel: rgba(138, 180, 255, 0.14);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --card: rgba(250, 250, 252, 0.96);
+      --line: rgba(0, 0, 0, 0.07);
+      --text: #17171c;
+      --muted: #6b6b76;
+      --key-bg: rgba(0, 0, 0, 0.05);
+      --accent: #2f6bff;
+      --hover: rgba(0, 0, 0, 0.04);
+      --sel: rgba(47, 107, 255, 0.10);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: transparent; overflow: hidden; user-select: none; }
+  body {
+    display: grid; place-items: center; padding: 24px;
+    font: 14px/1.3 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    color: var(--text);
+  }
+  #card {
+    width: 100%; max-height: 100%; display: flex; flex-direction: column;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  }
+  #card[hidden] { display: none; }
+  #search {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px; border-bottom: 1px solid var(--line);
+    font-size: 16px;
+  }
+  #search[hidden] { display: none; }
+  #search svg { flex: none; color: var(--muted); }
+  #query:empty::before { content: "Search windows"; color: var(--muted); }
+  #caret { width: 1.5px; height: 1.2em; margin-left: -8px; background: var(--accent); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  #list { overflow-y: auto; scrollbar-width: none; padding: 6px; }
+  #list:empty { display: none; }
+  .empty { padding: 8px 10px; color: var(--muted); }
+  .row {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 8px 10px; border: 0; border-radius: 9px; background: none;
+    color: inherit; font: inherit; text-align: left; cursor: default;
+    transition: opacity 80ms;
+  }
+  .row:hover { background: var(--hover); }
+  .row.sel { background: var(--sel); }
+  .row.dim { opacity: 0.25; }
+  kbd {
+    flex: none; min-width: 2.4em; padding: 3px 0; border-radius: 6px;
+    background: var(--key-bg); text-align: center;
+    font: 600 13px/1.2 "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
+    color: var(--muted);
+  }
+  kbd .done { opacity: 0.3; }
+  kbd .later { opacity: 0.45; }
+  .typing .row:not(.dim) kbd .next {
+    color: var(--accent); text-decoration: underline 2px; text-underline-offset: 3px;
+  }
+  .row:not(.dim) kbd { color: var(--text); }
+  /* User-set hints. Window (\): outlined. App (|, saved): accent-tinted fill. */
+  .row kbd.window { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent); }
+  .row kbd.app { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+
+  #card { position: relative; }
+  #card.editing { min-height: 240px; }
+  #edit {
+    position: absolute; inset: 0; z-index: 1; border-radius: inherit;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    padding: 20px; background: var(--card); backdrop-filter: blur(6px); text-align: center;
+  }
+  #edit[hidden] { display: none; }
+  #edit .label { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  #edit .target { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #edit .target .title { margin-left: 6px; }
+  #slots { display: flex; gap: 8px; }
+  #slots span {
+    width: 44px; height: 52px; display: grid; place-items: center; border-radius: 10px;
+    background: var(--key-bg); font: 600 24px "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
+  }
+  #slots span.on { box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent); }
+  #slots span.next { box-shadow: inset 0 0 0 1.5px var(--line); }
+  #edit .err { color: #ff7b7b; font-size: 13px; min-height: 1.3em; }
+  #edit .help { color: var(--muted); font-size: 12px; }
+  #edit .help kbd { min-width: 0; padding: 1px 6px; font-size: 11px; color: var(--text); }
+  .searching kbd { display: none; }
+  .app { flex: none; font-weight: 600; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .title { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .m { color: var(--accent); font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="card" hidden>
+  <div id="search" hidden>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <span id="query"></span><span id="caret"></span>
+  </div>
+  <div id="list"></div>
+  <div id="edit" hidden>
+    <div class="label" id="e-label"></div>
+    <div class="target"><span class="app" id="e-app"></span><span class="title" id="e-title"></span></div>
+    <div id="slots"></div>
+    <div class="err" id="e-err"></div>
+    <div class="help" id="e-help"></div>
+  </div>
+</div>
+<script>
+  const { listen } = window.__TAURI__.event;
+  const { invoke } = window.__TAURI__.core;
+  const $ = id => document.getElementById(id);
+  const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text ?? '' });
+
+  // Wrap matched char positions [offset, offset+len) of `text` in <span class=m>.
+  function highlight(span, text, hits, offset) {
+    const chars = [...text];
+    chars.forEach((c, i) => span.append(hits.has(i + offset) ? el('span', 'm', c) : c));
+    return span;
+  }
+
+  const MAX_HINT = 4;
+  const kbdHtml = k => `<kbd>${k}</kbd>`;
+
+  function renderEdit(edit) {
+    $('edit').hidden = !edit;
+    $('card').classList.toggle('editing', !!edit);
+    if (!edit) return;
+    const app = edit.scope === 'app';
+    $('e-label').textContent = app ? 'Hint for every window of this app · saved' : 'Hint for this window';
+    $('e-app').textContent = edit.app;
+    $('e-title').textContent = app || edit.title === edit.app ? '' : edit.title;
+    const chars = [...edit.keys];
+    $('slots').replaceChildren(...Array.from({ length: MAX_HINT }, (_, i) =>
+      el('span', i < chars.length ? 'on' : i === chars.length ? 'next' : '', chars[i])));
+    $('e-err').textContent = edit.error ?? '';
+    const now = `Now ${kbdHtml(edit.current || '–')}${{ window: ' (window hint)', app: ' (app hint)' }[edit.kind] ?? ''}`;
+    $('e-help').innerHTML = `${now} · ${kbdHtml('Enter')} save · ${kbdHtml('Del')} reset to default · ${kbdHtml('Esc')} back`;
+  }
+
+  // Where there's no global keyboard hook (Wayland), the overlay has focus and forwards
+  // keys to the Rust state machine. On Windows the hook swallows them before we'd see them.
+  let domInput = false;
+  const forward = down => e => {
+    if (!domInput) return;
+    e.preventDefault();
+    invoke('key', { key: e.key, down });
+  };
+  addEventListener('keydown', forward(true));
+  addEventListener('keyup', forward(false));
+  // Focused overlay: clicking another window should dismiss it.
+  addEventListener('blur', () => domInput && invoke('hide'));
+
+  listen('view', ({ payload: { rows, typed, search, edit, dom_input } }) => {
+    domInput = dom_input;
+    renderEdit(edit);
+    $('card').hidden = rows.length === 0 && !search;
+    $('search').hidden = !search;
+    $('card').classList.toggle('searching', !!search);
+    $('card').classList.toggle('typing', !search && typed.length > 0);
+    $('query').textContent = search?.query ?? '';
+
+    $('list').replaceChildren(...rows.map((w, i) => {
+      const match = !search && w.key.startsWith(typed);
+      const row = el('button', 'row');
+      row.classList.toggle('dim', !search && !match);
+      row.classList.toggle('sel', !!search && i === search.sel);
+      row.onclick = e => { e.stopPropagation(); invoke('activate', { id: w.id }); };
+
+      const kbd = el('kbd', w.kind);
+      // Per char: already typed (faded) / the one to press next / still to come (muted).
+      const n = match ? typed.length : 0;
+      kbd.append(...[...w.key].map((c, i) => el('span', i < n ? 'done' : i === n ? 'next' : 'later', c)));
+
+      // Hit indices are char positions in "app title" (or just "app" when title == app).
+      const hits = new Set(w.hits);
+      const appLen = [...w.app].length;
+      const title = w.title === w.app ? '' : w.title;
+      row.append(kbd, highlight(el('span', 'app'), w.app, hits, 0), highlight(el('span', 'title'), title, hits, appLen + 1));
+      return row;
+    }));
+
+    if (search && rows.length === 0) $('list').replaceChildren(el('div', 'empty', 'No matching windows'));
+    $('list').querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
+  });
+
+  // Clicking the transparent area around the card dismisses.
+  document.body.onclick = () => invoke('hide');
+</script>
+</body>
+</html>
