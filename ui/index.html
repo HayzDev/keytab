@@ -6,9 +6,9 @@
 <style>
   :root {
     /* The window behind the card is acrylic-blurred (win32::init); this is the tint on top. */
-    --card: rgba(19, 21, 27, 0.88);
+    --card: rgba(19, 21, 27, 0.82);
     --line: rgba(255, 255, 255, 0.08);
-    --edge: rgba(255, 255, 255, 0.16);
+    --edge: rgba(255, 255, 255, 0.22);
     --text: #ededf2;
     --muted: #a8a8b3;
     --faint: #8c8c98;
@@ -92,11 +92,11 @@
   }
   /* Hint progress, on every matching chip: typed letters recede, the keys still to press
      turn accent. Blue fill is reserved for the selected row. */
-  kbd .done { opacity: 0.5; }
+  /* 0.65 keeps typed letters at 4:1 or more on every chip fill (plain, amber, selected). */
+  kbd .done { opacity: 0.65; }
   .typing kbd .rest { color: var(--accent); }
   .row.sel kbd { background: var(--accent); color: var(--on-accent); }
   .row.sel kbd .rest { color: inherit; }
-  .row.sel kbd .done { opacity: 0.55; }
   /* Hints you set: amber letters, same chip and width. Saved app hints (⇧\) are plain
      amber; this-window hints (\) also get a dotted underline. */
   kbd.app, kbd.window { color: var(--custom); }
@@ -121,12 +121,9 @@
   /* Matches are underlined as well as tinted, so they don't rely on color alone. */
   .m { color: var(--accent); text-decoration: underline 1.5px; text-underline-offset: 3px; }
 
-  /* Shift: one large live preview of the selected window under an unchanged list. Windows
-     draws it with DWM over this box; the box itself only shows when there's nothing to draw. */
-  #pcap { display: flex; align-items: center; gap: 8px; margin: 2px 16px 8px; color: var(--muted); font-size: 12.5px; }
-  #pcap[hidden] { display: none; }
-  /* No chip while searching: start at the icon column, under the search glass. */
-  .searching #pcap { margin-left: calc(16px + 44.2px + 10px); }
+  /* Shift: one large live preview of the selected window under an unchanged list, with no
+     caption (the selected row names it). Windows draws it with DWM over this box; the box
+     itself only shows when there's nothing to draw. */
   #preview {
     margin: 0 6px 6px; border-radius: 6px; background: var(--well);
     display: grid; place-items: center; overflow: hidden;
@@ -138,6 +135,7 @@
   .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
   .keys kbd { width: auto; min-width: 1.7em; padding: 1px 5px; margin-right: 5px; font-size: 12px; color: var(--text); }
   .keys .or { margin: 0 5px 0 0; }
+  .keys .plus { margin: 0 3px 0 -2px; }
   .keys .aux { margin-left: auto; display: flex; gap: inherit; }
   #foot { padding: 8px 16px 9px; border-top: 1px solid var(--line); }
   .editing #list, .editing #search { display: none; }
@@ -157,7 +155,8 @@
     position: relative; width: 42px; height: 48px; display: grid; place-items: center; border-radius: 7px;
     background: var(--key-bg); font: 700 22px "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
   }
-  #slots span.on { background: var(--accent); color: var(--on-accent); }
+  /* Typed letters are amber: they become a hint you set. The blue outline marks where you type. */
+  #slots span.on { background: var(--custom); color: var(--on-custom); }
   #slots span.next { background: none; box-shadow: inset 0 0 0 1.5px var(--accent); }
   #slots span.empty { background: none; border: 1.5px dashed var(--edge); }
   #slots span.next::after { content: ""; width: 1.5px; height: 20px; background: var(--accent); }
@@ -180,7 +179,6 @@
     <span id="query"></span><span id="caret"></span>
   </div>
   <div id="list"></div>
-  <div id="pcap" hidden></div>
   <div id="preview" hidden></div>
   <div id="edit" hidden>
     <div class="target" id="e-target"></div>
@@ -194,7 +192,10 @@
   const { invoke } = window.__TAURI__.core;
   const $ = id => document.getElementById(id);
   const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text ?? '' });
-  const keys = (...pairs) => pairs.map(([k, what]) => `<span><kbd>${k}</kbd>${what}</span>`).join('');
+  // One chip per key: "Ctrl+P" means press together, "E or 3" means either key.
+  const caps = k => k.split(/(\+| or )/).map(t => t === '+' ? '<span class="plus">+</span>'
+    : t === ' or ' ? '<span class="or">or</span>' : `<kbd>${t}</kbd>`).join('');
+  const keys = (...pairs) => pairs.map(([k, what]) => `<span>${caps(k)}${what}</span>`).join('');
 
   // Wrap matched char positions [offset, offset+len) of `text` in <span class=m>.
   function highlight(span, text, hits, offset) {
@@ -259,7 +260,9 @@
   // The footer follows the state with one order everywhere: what to type, ↵ open, ⌫ back,
   // preview, mode switch; on the right, actions on the selected window, then Esc.
   function renderFoot(search, preview, edit, rows, typed, pinned, closing) {
-    if (edit) return $('foot').innerHTML = keys(edit.error ? ['⌫', 'change'] : ['↵', 'save'], ['Del', 'reset to automatic'], ['Esc', 'back']);
+    if (edit) return $('foot').innerHTML = keys(['a–z 0–9', 'hint'], edit.error ? ['⌫', 'change'] : ['↵', 'save'],
+      // Del only does something when this scope has a hint you set.
+      ...(edit.kind === (edit.scope === 'app' ? 'app' : 'window') ? [['Del', 'reset to automatic']] : []), ['Esc', 'back']);
     if (closing) {
       const w = rows.find(w => w.id === closing);
       return $('foot').innerHTML = `<span class="warn">Close ${esc(w?.app ?? 'this')} window?</span>`
@@ -270,14 +273,14 @@
     // Shift release opens only a hint that's fully typed (switcher::unique_hint).
     const type = search ? ''
       : !typed ? keys(['a–z 0–9', 'hint'])
-      : next.length ? `<span>${next.map(c => `<kbd>${c}</kbd>`).join('<span class="or">or</span>')}to finish</span>`
+      : next.length ? keys([next.join(' or '), 'to finish'])
       : keys(['⇧', 'release to open']);
-    const pin = ['Ctrl P', pinned ? 'unpin previews' : 'pin previews'];
+    const pin = ['Ctrl+P', pinned ? 'turn preview off' : 'keep preview on'];
     // While Shift is held the preview is already up: offer pinning, and no mode switch.
     // Typing a prefix is a short step: finish it, open, or back out; the rest stays one key away.
-    const left = preview ? [pin]
+    const left = preview ? (typed ? [['⌫', 'back'], pin] : [pin])
       : typed ? [['⌫', 'back'], pinned ? pin : ['L⇧', 'preview']]
-      : [pinned ? pin : ['L⇧', 'preview'], search ? ['R⇧', 'hints'] : ['R⇧ /', 'search']];
+      : [pinned ? pin : ['L⇧', 'preview'], search ? ['R⇧', 'back to hints'] : ['R⇧ or /', 'search']];
     const aux = (preview || typed ? [] : [['\\', 'set hint'], ['Del', 'close window']]).concat([['Esc', 'dismiss']]);
     $('foot').innerHTML = type + keys(['↵', 'open'], ...left) + `<span class="aux">${keys(...aux)}</span>`;
   }
@@ -354,12 +357,10 @@
 
     // Shift held or Ctrl+P: one preview of the selected window, in hint and search mode.
     const big = (preview || pinned) && !edit && rows.find(w => w.id === selected);
-    $('preview').hidden = $('pcap').hidden = !big;
+    $('preview').hidden = !big;
     if (big) {
       $('preview').dataset.id = big.id;
       $('preview').replaceChildren(icon(big));
-      // Hints are hidden while searching, so the caption drops its chip there too.
-      $('pcap').replaceChildren(...(search ? [] : [chip(big, typed)]), el('span', '', `Preview · ${big.app}`));
     }
 
     if (search && rows.length === 0) $('list').replaceChildren(el('div', 'empty', 'No matching windows'));

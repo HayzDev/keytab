@@ -254,8 +254,9 @@ pub fn refresh() {
 // ---- search ----------------------------------------------------------------------
 
 /// What search matches against. The UI splits it back into app / title for highlighting.
+/// A title that only repeats the app name (any case) isn't shown, so it mustn't match either.
 fn haystack(w: &Win) -> String {
-    if w.title == w.app { w.app.clone() } else { format!("{} {}", w.app, w.title) }
+    if w.title.to_lowercase() == w.app.to_lowercase() { w.app.clone() } else { format!("{} {}", w.app, w.title) }
 }
 
 /// fzf-style: space-separated terms must all fuzzy-match; scores add up.
@@ -677,13 +678,15 @@ mod tests {
             w("Discord", "@splep - Discord"),
             w("Spotify", "Spotify Premium"),
             w("Steamwebhelper", "Steam"),
+            w("VoiceMeeter Banana", "Voicemeeter Banana"),
         ];
         let top = |q: &str| rank(&ws, q).first().map(|h| ws[h.0].app.as_str());
-        assert_eq!(rank(&ws, "").len(), 4); // empty query = everything, MRU order
+        assert_eq!(rank(&ws, "").len(), 5); // empty query = everything, MRU order
         assert_eq!(top("spt"), Some("Spotify"));
         assert_eq!(top("ytube"), Some("Vivaldi")); // matches the title too
         assert_eq!(top("disc splep"), Some("Discord")); // multi-term
         assert!(rank(&ws, "zzz").is_empty());
+        assert_eq!(rank(&ws, "viv").len(), 1); // a hidden same-as-app title can't supply the 2nd v
     }
 
     #[test]
