@@ -53,7 +53,8 @@
   }
   #card {
     position: relative; width: 100%; display: flex; flex-direction: column;
-    background: var(--card); border: 1px solid var(--edge); border-radius: 8px; overflow: hidden;
+    /* A faint top sheen reads as glass without thinning the tint (text contrast on light backdrops). */
+    background: linear-gradient(rgba(255, 255, 255, 0.045), transparent 120px), var(--card); border: 1px solid var(--edge); border-radius: 8px; overflow: hidden;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
   #card[hidden] { display: none; }
@@ -90,13 +91,11 @@
     font: 700 13px/1.25 "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
     color: var(--text);
   }
-  /* Hint progress, on every matching chip: typed letters recede, the keys still to press
-     turn accent. Blue fill is reserved for the selected row. */
-  /* 0.65 keeps typed letters at 4:1 or more on every chip fill (plain, amber, selected). */
-  kbd .done { opacity: 0.65; }
-  .typing kbd .rest { color: var(--accent); }
+  /* Hint progress: typed letters recede, every letter keeps its base color (white automatic,
+     amber custom). Blue means selected and nothing else. 0.72 keeps typed letters at 4.5:1
+     or more on every chip fill (plain, amber, selected blue, selected amber). */
+  kbd .done { opacity: 0.72; }
   .row.sel kbd { background: var(--accent); color: var(--on-accent); }
-  .row.sel kbd .rest { color: inherit; }
   /* Hints you set: amber letters, same chip and width. Saved app hints (⇧\) are plain
      amber; this-window hints (\) also get a dotted underline. */
   kbd.app, kbd.window { color: var(--custom); }
@@ -124,8 +123,10 @@
   /* Shift: one large live preview of the selected window under an unchanged list, with no
      caption (the selected row names it). Windows draws it with DWM over this box; the box
      itself only shows when there's nothing to draw. */
+  /* The ring sits outside the box, where the DWM thumbnail doesn't draw, so it frames
+     dark previewed windows against the panel. */
   #preview {
-    margin: 0 6px 6px; border-radius: 6px; background: var(--well);
+    margin: 0 6px 6px; border-radius: 6px; background: var(--well); box-shadow: 0 0 0 1px var(--edge);
     display: grid; place-items: center; overflow: hidden;
   }
   #preview[hidden] { display: none; }
@@ -245,9 +246,10 @@
       el('span', 'app', app ? `Hint for all ${edit.app} windows` : `Hint for this ${edit.app} window`),
       ...(!app && title ? [el('span', 'title', title)] : []));
     const same = wins.filter(x => x.app === edit.app).length;
-    $('e-note').textContent = app && same > 1 && edit.keys
+    // On a clash the conflict is the only message: the note describes a save that can't happen.
+    $('e-note').textContent = edit.error ? '' : app && same > 1 && edit.keys
       ? `${same === 2 ? 'Both' : `All ${same}`} ${edit.app} windows → ${Array.from({ length: same }, (_, i) => edit.keys.toUpperCase() + (i + 1)).join(', ')}`
-      : app ? '' : 'Press ⇧\\ instead to set it for every window of the app';
+      : app ? `Also applies to ${edit.app} windows opened later` : 'Press ⇧\\ instead to set it for every window of the app';
     const chars = [...edit.keys];
     $('slots').replaceChildren(...Array.from({ length: Math.min(MAX_HINT, Math.max(2, chars.length + 1)) }, (_, i) =>
       el('span', i < chars.length ? 'on' : i === chars.length ? 'next' : 'empty', chars[i])));
@@ -276,11 +278,12 @@
       : next.length ? keys([next.join(' or '), 'to finish'])
       : keys(['⇧', 'release to open']);
     const pin = ['Ctrl+P', pinned ? 'turn preview off' : 'keep preview on'];
-    // While Shift is held the preview is already up: offer pinning, and no mode switch.
-    // Typing a prefix is a short step: finish it, open, or back out; the rest stays one key away.
-    const left = preview ? (typed ? [['⌫', 'back'], pin] : [pin])
-      : typed ? [['⌫', 'back'], pinned ? pin : ['L⇧', 'preview']]
-      : [pinned ? pin : ['L⇧', 'preview'], search ? ['R⇧', 'back to hints'] : ['R⇧ or /', 'search']];
+    // Holding Shift adds to the mode's footer rather than replacing it: the preview is already
+    // up, so L⇧ becomes Ctrl+P. Typing a prefix is a short step: finish it, open, or back out.
+    // With Shift down, / types "?", so only R⇧ switches.
+    const mode = search ? ['R⇧', 'back to hints'] : [preview ? 'R⇧' : 'R⇧ or /', 'search'];
+    const left = typed ? [['⌫', 'back'], preview || pinned ? pin : ['L⇧', 'preview']]
+      : [preview || pinned ? pin : ['L⇧', 'preview'], mode];
     const aux = (preview || typed ? [] : [['\\', 'set hint'], ['Del', 'close window']]).concat([['Esc', 'dismiss']]);
     $('foot').innerHTML = type + keys(['↵', 'open'], ...left) + `<span class="aux">${keys(...aux)}</span>`;
   }
