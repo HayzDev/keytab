@@ -60,10 +60,9 @@
   #card[hidden] { display: none; }
 
   /* Search: an inset field with a steady caret (no animations by design). */
-  /* The field shares the rows' grid: the glass sits in the icon column and the query starts
-     where app names do (row inset 16px + chip 3.4×13px + gap, minus this 8px margin). */
+  /* Search rows omit the hint-chip column. */
   #search {
-    display: flex; align-items: center; gap: 10px; margin: 8px 8px 0; padding: 10px 12px 10px calc(8px + 44.2px + 10px);
+    display: flex; align-items: center; gap: 10px; margin: 8px 8px 0; padding: 10px 12px;
     border-radius: 6px; background: var(--field); font-size: 15px;
   }
   #search[hidden] { display: none; }
@@ -91,23 +90,28 @@
     font: 700 13px/1.25 "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
     color: var(--text);
   }
+  kbd, #slots span {
+    background: linear-gradient(rgba(255,255,255,.045), transparent), rgba(255,255,255,.07);
+    border: 1px solid var(--line);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+  }
   /* Hint progress: typed letters recede, every letter keeps its base color (white automatic,
      amber custom). Blue means selected and nothing else. 0.72 keeps typed letters at 4.5:1
      or more on every chip fill (plain, amber, selected blue, selected amber). */
   kbd .done { opacity: 0.72; }
-  .row.sel kbd { background: var(--accent); color: var(--on-accent); }
+  .row.sel kbd { background-color: var(--accent); color: var(--on-accent); }
   /* Hints you set: amber letters, same chip and width. Saved app hints (⇧\) are plain
      amber; this-window hints (\) also get a dotted underline. */
   kbd.app, kbd.window { color: var(--custom); }
   kbd.window { text-decoration: underline dotted 1.5px; text-underline-offset: 3px; }
   /* Selected custom hints keep their amber: amber fill instead of the accent fill. */
-  .row.sel kbd.app, .row.sel kbd.window { background: var(--custom); color: var(--on-custom); }
+  .row.sel kbd.app, .row.sel kbd.window { background-color: var(--custom); color: var(--on-custom); }
   /* Del armed: the row about to close turns red until a second Del or any other key. */
   .row.closing { background: var(--danger-bg); }
-  .row.closing kbd { background: var(--danger); color: var(--on-accent); }
+  .row.closing kbd { background-color: var(--danger); color: var(--on-accent); }
   .keys .warn { color: var(--danger); font-weight: 600; }
-  /* Search types into the query: chips go blank but keep their column, so nothing moves. */
-  .searching .row kbd { visibility: hidden; }
+  /* Search types into the query, so hint chips take no space. */
+  .searching .row kbd { display: none; }
 
   .icon { flex: none; width: 20px; height: 20px; object-fit: contain; }
   .mono {
@@ -126,7 +130,7 @@
   /* The ring sits outside the box, where the DWM thumbnail doesn't draw, so it frames
      dark previewed windows against the panel. */
   #preview {
-    margin: 0 6px 6px; border-radius: 6px; background: var(--well); box-shadow: 0 0 0 1px var(--edge);
+    margin: 8px 6px 6px; border-radius: 6px; background: var(--well); box-shadow: 0 0 0 1px var(--edge);
     display: grid; place-items: center; overflow: hidden;
   }
   #preview[hidden] { display: none; }
@@ -134,7 +138,7 @@
 
   /* Key legend: the same component in every mode. */
   .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
-  .keys kbd { width: auto; min-width: 1.7em; padding: 1px 5px; margin-right: 5px; font-size: 12px; color: var(--text); }
+  .keys kbd { width: auto; min-width: 1.7em; padding: 1px 5px; margin-right: 5px; font-size: 12px; color: var(--text); border-radius: 5px; background: linear-gradient(rgba(255,255,255,.045), transparent), rgba(255,255,255,.07); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
   .keys .or { margin: 0 5px 0 0; }
   .keys .plus { margin: 0 3px 0 -2px; }
   .keys .aux { margin-left: auto; display: flex; gap: inherit; }
@@ -154,10 +158,10 @@
   /* Slots are big hint chips: filled when typed, outlined with a caret where you type next. */
   #slots span {
     position: relative; width: 42px; height: 48px; display: grid; place-items: center; border-radius: 7px;
-    background: var(--key-bg); font: 700 22px "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
+    font: 700 22px "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
   }
   /* Typed letters are amber: they become a hint you set. The blue outline marks where you type. */
-  #slots span.on { background: var(--custom); color: var(--on-custom); }
+  #slots span.on { background-color: var(--custom); color: var(--on-custom); }
   #slots span.next { background: none; box-shadow: inset 0 0 0 1.5px var(--accent); }
   #slots span.empty { background: none; border: 1.5px dashed var(--edge); }
   #slots span.next::after { content: ""; width: 1.5px; height: 20px; background: var(--accent); }
@@ -195,7 +199,7 @@
   const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text ?? '' });
   // One chip per key: "Ctrl+P" means press together, "E or 3" means either key.
   const caps = k => k.split(/(\+| or )/).map(t => t === '+' ? '<span class="plus">+</span>'
-    : t === ' or ' ? '<span class="or">or</span>' : `<kbd>${t}</kbd>`).join('');
+    : t === ' or ' ? '<span class="or">or</span>' : `<kbd>${({ Esc: '⎋', Ctrl: '⌃', Del: '⌦', Backspace: '⌫', '\\': '⧵' })[t] ?? t}</kbd>`).join('');
   const keys = (...pairs) => pairs.map(([k, what]) => `<span>${caps(k)}${what}</span>`).join('');
 
   // Wrap matched char positions [offset, offset+len) of `text` in <span class=m>.
@@ -262,7 +266,7 @@
   // The footer follows the state with one order everywhere: what to type, ↵ open, ⌫ back,
   // preview, mode switch; on the right, actions on the selected window, then Esc.
   function renderFoot(search, preview, edit, rows, typed, pinned, closing) {
-    if (edit) return $('foot').innerHTML = keys(['a–z 0–9', 'hint'], edit.error ? ['⌫', 'change'] : ['↵', 'save'],
+    if (edit) return $('foot').innerHTML = keys(edit.error ? ['⌫', 'change'] : ['↵', 'save'],
       // Del only does something when this scope has a hint you set.
       ...(edit.kind === (edit.scope === 'app' ? 'app' : 'window') ? [['Del', 'reset to automatic']] : []), ['Esc', 'back']);
     if (closing) {
@@ -270,13 +274,6 @@
       return $('foot').innerHTML = `<span class="warn">Close ${esc(w?.app ?? 'this')} window?</span>`
         + keys(['Del', 'close window'], ['Esc', 'cancel']);
     }
-    const next = [...new Set(rows.filter(w => w.key.startsWith(typed) && w.key.length > typed.length)
-      .map(w => w.key[typed.length].toUpperCase()))];
-    // Shift release opens only a hint that's fully typed (switcher::unique_hint).
-    const type = search ? ''
-      : !typed ? keys(['a–z 0–9', 'hint'])
-      : next.length ? keys([next.join(' or '), 'to finish'])
-      : keys(['⇧', 'release to open']);
     const pin = ['Ctrl+P', pinned ? 'turn preview off' : 'keep preview on'];
     // Holding Shift adds to the mode's footer rather than replacing it: the preview is already
     // up, so L⇧ becomes Ctrl+P. Typing a prefix is a short step: finish it, open, or back out.
@@ -285,7 +282,7 @@
     const left = typed ? [['⌫', 'back'], preview || pinned ? pin : ['L⇧', 'preview']]
       : [preview || pinned ? pin : ['L⇧', 'preview'], mode];
     const aux = (preview || typed ? [] : [['\\', 'set hint'], ['Del', 'close window']]).concat([['Esc', 'dismiss']]);
-    $('foot').innerHTML = type + keys(['↵', 'open'], ...left) + `<span class="aux">${keys(...aux)}</span>`;
+    $('foot').innerHTML = keys(['↵', 'open'], ['Ctrl', 'current window'], ...left) + `<span class="aux">${keys(...aux)}</span>`;
   }
   const esc = t => t.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 

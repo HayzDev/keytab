@@ -8,6 +8,8 @@ layer-rule {
 }
 
 binds {
+    Alt+Tab repeat=false hotkey-overlay-title="Keytab" { spawn "~/.local/bin/keytabctl" "--toggle"; }
+    Alt+Shift+Tab repeat=false hotkey-overlay-title="Keytab Search" { spawn "~/.local/bin/keytabctl" "--search"; }
     Mod+Tab repeat=false hotkey-overlay-title="Keytab" { spawn "~/.local/bin/keytabctl" "--toggle"; }
     Mod+Shift+Tab repeat=false hotkey-overlay-title="Keytab Search" { spawn "~/.local/bin/keytabctl" "--search"; }
 }

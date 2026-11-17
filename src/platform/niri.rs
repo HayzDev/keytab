@@ -49,11 +49,12 @@ pub fn init(overlay: &Overlay) -> tauri::Result<()> {
     window.set_layer(Layer::Overlay);
     window.set_keyboard_mode(KeyboardMode::None);
     window.set_accept_focus(true);
-    window.input_shape_combine_region(Some(&gtk::cairo::Region::create()));
     super::gtk_ui::init(&window);
     assert!(window.is_layer_window(), "keytab: layer-shell initialization failed");
     // Keep the renderer and Wayland surface warm; the empty panel is transparent.
     window.show_all();
+    // GTK replaces a pre-realization input shape while mapping the window.
+    window.input_shape_combine_region(Some(&gtk::cairo::Region::create()));
     material(&window, 0, 0, 0, 0);
     overlay.gtk_window()?.connect_destroy(move |_| window.close());
     Ok(())
@@ -99,16 +100,16 @@ fn niri(args: &[&str]) -> Option<String> {
 }
 
 /// All windows, focused / most recently focused first. Keys unassigned.
-pub fn list() -> Vec<Win> {
-    let Some(json) = niri(&["--json", "windows"]) else { return Vec::new() };
-    let mut wins: Vec<NiriWindow> = serde_json::from_str(&json).unwrap_or_else(|e| {
+/// None means IPC failed; it must not be mistaken for all windows having closed.
+pub fn list() -> Option<Vec<Win>> {
+    let json = niri(&["--json", "windows"])?;
+    let mut wins: Vec<NiriWindow> = serde_json::from_str(&json).map_err(|e| {
         eprintln!("keytab: unexpected `niri msg --json windows` output: {e}");
-        Vec::new()
-    });
+    }).ok()?;
     let me = std::process::id() as i32;
     wins.retain(|w| w.pid != Some(me));
     wins.sort_by_key(|w| Reverse((w.is_focused, timestamp(&w.focus_timestamp))));
-    wins.into_iter()
+    Some(wins.into_iter()
         .map(|w| {
             let title = w.title.unwrap_or_default();
             // "org.gnome.Nautilus" -> "Nautilus", "firefox" -> "Firefox"
@@ -118,7 +119,20 @@ pub fn list() -> Vec<Win> {
             };
             Win::new(w.id as WinId, app, title)
         })
-        .collect()
+        .collect())
+}
+
+pub fn window_hint_session() -> Option<&'static str> {
+    static SESSION: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SESSION.get_or_init(|| {
+        let socket = std::env::var("NIRI_SOCKET").ok()?;
+        let pid: u32 = std::path::Path::new(&socket).file_stem()?.to_str()?.rsplit('.').next()?.parse().ok()?;
+        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        // Field 22, after the parenthesized command and fields 3 through 21.
+        let start: u64 = stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()?;
+        Some(format!("{}:{pid}:{start}:{socket}", boot.trim()))
+    }).as_deref()
 }
 
 pub fn focus(id: WinId) {
@@ -128,11 +142,6 @@ pub fn focus(id: WinId) {
 /// Like clicking X: the app may still ask to save.
 pub fn close(id: WinId) {
     niri(&["action", "close-window", "--id", &id.to_string()]);
-}
-
-/// shortcut: stale hints stay in memory; prune against list() if the map grows large.
-pub fn alive(_id: WinId) -> bool {
-    true
 }
 
 /// Layer-shell grants keyboard focus without creating a managed app window.

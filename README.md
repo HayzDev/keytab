@@ -12,18 +12,29 @@ Inspired by [Adam Basis](https://www.youtube.com/@AdamBasis)'s alt-tab videos.
 | letters | focus the window with that hint (two letters when first letters clash) |
 | **Right Shift** (while open) | switch to search mode; press again to go back to hints |
 | `/` | switch from hints to search mode |
-| hold **Left Shift** | preview the selected window; in hint mode, release to focus a unique match. Works in search too |
+| hold **Left Shift** | preview the selected window; in hint mode, release to focus a fully typed hint. Works in search too |
+| **Ctrl** | select the window active before opening Keytab, if it is in the results |
 | **Ctrl+P** | keep previews on without holding Shift (until pressed again or keytab restarts) |
 | Backspace | undo a typed letter / query character |
 | ↑ ↓ or **Alt+K / Alt+J** | move the selection in either mode |
 | Enter | focus the selected window in either mode |
-| Delete | close the selected window; in the hint dialog: reset to default |
+| Delete | ask to close the selected window; press again to confirm. In the hint dialog: reset to default |
 | `\` | set a hint for this one window (lives as long as the window) |
 | `\|` | set a hint for every window of this app (saved to disk) |
 | Esc / CapsLock | close or go back |
 
+Partial hint matches prioritize other windows ahead of the window that was active
+when Keytab opened. Ctrl can still select that active window explicitly.
+
 Hints are prefix-free. Auto hints use the app's own letters (chrome + code → `ch`, `co`). User hints win, and the auto hints rearrange around them.
 If several windows of one app share an app hint `x`, they become `x1`, `x2`, …
+
+On Niri, per-window hints are saved immediately to `~/.config/keytab/window-hints.json`
+and survive Keytab updates and restarts while that same window remains open.
+Closed-window records are pruned on the next successful window-list refresh.
+The cache is scoped to the Niri instance (boot, process start time, and socket),
+so a new desktop session cannot inherit old window IDs. Window titles may change
+without losing their hint. Windows per-window hints still remain in memory.
 
 App hints are saved in `%APPDATA%\keytab\app-hints.json` on Windows and `~/.config/keytab/app-hints.json` on Linux. The file maps lowercase app name to hint.
 
@@ -77,7 +88,7 @@ niri msg action load-config-file
 ~/.local/bin/keytab
 ```
 
-**Win+Tab** opens hints; **Win+Shift+Tab** opens fuzzy search. Keytab starts hidden
+**Win+Tab** or **Alt+Tab** opens hints; **Win+Shift+Tab** or **Alt+Shift+Tab** opens fuzzy search. Keytab starts hidden
 on future Niri logins. The overlay uses the `keytab` layer namespace and does not
 appear in Niri's normal window list or trigger window tiling/open animations.
 The panel has a translucent background, a thin lighter outline, and compositor
@@ -89,11 +100,19 @@ Escape, selecting a window, or clicking the transparent area dismisses it.
 Previews are snapshots loaded asynchronously through Niri’s PipeWire interface.
 They stay in memory and leave the clipboard untouched. Recent snapshots are reused
 immediately; snapshots older than five seconds refresh in the background on the
-next Shift hold. Captures share one temporary session and scale on the GPU.
-In normal mode, hints wait for Shift release while previews are shown; a unique
-prefix is enough to focus. Shifted number-row symbols (`!` through `)`) count as
+next preview request. Only the selected window is captured, using a temporary
+session and GPU scaling. Capture resolution follows the display scale, so enlarged
+previews retain detail on HiDPI displays. One framed preview sits below the list in both modes.
+In normal mode, hints wait for Shift release while previews are shown; a
+fully typed hint opens on release. Shifted number-row symbols (`!` through `)`) count as
 their digits in hints, so Shift+2 still enters `2`. Backspace widens the matches again. In search mode,
-Shift only shows thumbnails; typing and Enter keep their normal behavior.
+Left Shift only shows the selected preview; typing and Enter keep their normal behavior.
+The native search field supports cursor movement, Shift selection, Ctrl+A,
+Ctrl+Backspace/Ctrl+Delete, and clipboard shortcuts. Ctrl+P, Ctrl+Enter, and
+Ctrl+\ or Ctrl+| remain Keytab commands. Bare Delete still asks to close a window.
+The GTK renderer includes app icons, custom-hint colors, and a key-symbol footer showing the
+actions available in the current state. The resident layer has an empty pointer
+input region while hidden, including immediately after login.
 
 Quit with `keytabctl --quit` (there's no tray on Linux).
 

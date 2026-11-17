@@ -2,8 +2,8 @@
 //!
 //! - `GLOBAL_INPUT: bool`: true if `start_input` sees keys system-wide (Windows hook).
 //!   false means the overlay takes focus and its UI delivers keyboard events.
-//! - `list() -> Vec<Win>`: switchable windows, most recently used first, excluding keytab.
-//! - `focus(WinId)`, `close(WinId)`, `alive(WinId) -> bool`
+//! - `list()`: switchable windows in recency order; Linux returns None on IPC failure.
+//! - `focus(WinId)`, `close(WinId)`; Windows also provides `alive(WinId)`.
 //! - `show(&Overlay)`, `hide(&Overlay)`: the overlay.
 //! - `start_input()`: begin delivering keys to `switcher::on_key` (may do nothing).
 //!

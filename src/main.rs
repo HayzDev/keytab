@@ -8,6 +8,8 @@
 mod keys;
 mod platform;
 mod switcher;
+#[cfg(target_os = "linux")]
+mod window_hints;
 
 #[tauri::command]
 fn activate(id: keys::WinId) {

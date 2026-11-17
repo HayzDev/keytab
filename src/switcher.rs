@@ -30,7 +30,7 @@ pub enum Key {
     Up,
     Down,
     Delete,
-    /// Either Ctrl: held + p = keep previews on; other Ctrl combos pass through.
+    /// Either Ctrl selects the active window; Ctrl+P pins previews, Ctrl+Enter opens.
     Ctrl,
     /// Left Alt: held + j/k = down/up.
     Alt,
@@ -129,12 +129,14 @@ struct State {
     previews_pinned: bool,
     typed: String,
     selected: Option<WinId>,
+    /// The window active before the overlay opened (first in the recency list).
+    active: Option<WinId>,
     wins: Vec<Win>,
     search: Option<Search>,
     edit: Option<Edit>,
     /// Del was pressed once on this window; a second Del closes it, any other key cancels.
     closing: Option<WinId>,
-    /// User-chosen hints per window. Lives as long as the window does.
+    /// User-chosen hints per window; restored across Keytab restarts on Niri.
     custom: BTreeMap<WinId, String>,
     /// User-chosen hints per app (lowercase app name). Saved to disk.
     app_hints: BTreeMap<String, String>,
@@ -151,6 +153,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     previews_pinned: false,
     typed: String::new(),
     selected: None,
+    active: None,
     wins: Vec::new(),
     search: None,
     edit: None,
@@ -162,7 +165,17 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 static OVERLAY: OnceLock<platform::Overlay> = OnceLock::new();
 
 pub fn init(app: AppHandle, overlay: platform::Overlay) {
-    STATE.lock().unwrap().app_hints = load_app_hints();
+    let mut state = STATE.lock().unwrap();
+    state.app_hints = load_app_hints();
+    #[cfg(target_os = "linux")]
+    if let Some(session) = platform::window_hint_session() {
+        state.custom = crate::window_hints::load(&hints_path().with_file_name("window-hints.json"), session).unwrap_or_else(|e| {
+            eprintln!("keytab: couldn't restore window hints: {e}");
+            BTreeMap::new()
+        });
+    } else {
+        eprintln!("keytab: couldn't identify the Niri instance; window hints remain in memory only");
+    }
     let _ = APP.set(app);
     let _ = OVERLAY.set(overlay);
 }
@@ -194,6 +207,16 @@ fn save_app_hints(hints: &BTreeMap<String, String>) {
     let _ = std::fs::create_dir_all(path.parent().unwrap());
     if let Err(e) = std::fs::write(&path, serde_json::to_string_pretty(hints).unwrap()) {
         eprintln!("keytab: couldn't save {}: {e}", path.display());
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn persist_window_hints(hints: &BTreeMap<WinId, String>) {
+    if APP.get().is_none() { return; }
+    if let Some(session) = platform::window_hint_session() {
+        if let Err(e) = crate::window_hints::save(&hints_path().with_file_name("window-hints.json"), session, hints) {
+            eprintln!("keytab: couldn't save window hints: {e}");
+        }
     }
 }
 
@@ -236,7 +259,7 @@ fn emit(s: &State) {
             q.hits.iter().map(|(i, h)| Row { win: &s.wins[*i], hits: h }).collect(),
             Some(SearchView { query: &q.query, sel: q.sel }),
         ),
-        None => (s.wins.iter().filter(|w| !s.preview_held || w.key.starts_with(&s.typed)).map(|w| Row { win: w, hits: &[] }).collect(), None),
+        None => (ordered_hints(s).into_iter().filter(|w| !s.preview_held || w.key.starts_with(&s.typed)).map(|w| Row { win: w, hits: &[] }).collect(), None),
     };
     let selected = s.search.as_ref().map_or_else(|| selected_hint(s), |q| q.hits.get(q.sel).map(|(i, _)| s.wins[*i].id));
     let view = View { rows, typed: &s.typed, search, edit: s.edit.as_ref(), dom_input: !platform::GLOBAL_INPUT, preview: s.preview_held, pinned: s.previews_pinned, selected, closing: s.closing };
@@ -249,6 +272,20 @@ fn emit(s: &State) {
 /// Replay state once the webview has installed its listener (including cold starts).
 pub fn refresh() {
     emit(&STATE.lock().unwrap());
+}
+
+/// The native search field owns text editing, selection, and the caret.
+#[cfg(target_os = "linux")]
+pub fn set_query(query: String) {
+    let mut s = STATE.lock().unwrap();
+    let hits = rank(&s.wins, &query);
+    let Some(search) = s.search.as_mut() else { return };
+    search.query = query;
+    search.hits = hits;
+    search.sel = first_sel(&search.query, search.hits.len());
+    s.closing = None;
+    if s.ctrl_held { select_active(&mut s); }
+    emit(&s);
 }
 
 // ---- search ----------------------------------------------------------------------
@@ -284,14 +321,27 @@ fn rank(wins: &[Win], query: &str) -> Vec<(usize, Vec<usize>)> {
 // ---- open / close / switch -------------------------------------------------------
 
 fn open(s: &mut State) {
+    #[cfg(windows)]
+    {
     s.custom.retain(|&id, _| platform::alive(id));
     s.wins = platform::list();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let Some(wins) = platform::list() else { return };
+        let previous = s.custom.len();
+        s.custom.retain(|id, _| wins.iter().any(|w| w.id == *id));
+        s.wins = wins;
+        if s.custom.len() != previous { persist_window_hints(&s.custom); }
+    }
+    s.active = s.wins.first().map(|w| w.id);
     keys::assign(&mut s.wins, &s.custom, &s.app_hints);
     s.typed.clear();
     s.selected = None;
     s.search = None;
     s.edit = None;
     s.open = true;
+    if s.ctrl_held { select_active(s); }
     emit(s);
     if let Some(w) = OVERLAY.get() {
         platform::show(w);
@@ -307,9 +357,11 @@ fn first_sel(query: &str, hits: usize) -> usize {
 fn open_search(s: &mut State) {
     if !s.open {
         open(s);
+        if !s.open { return; }
     }
     let hits = rank(&s.wins, "");
     s.search = Some(Search { query: String::new(), sel: first_sel("", hits.len()), hits });
+    if s.ctrl_held { select_active(s); }
     emit(s);
 }
 
@@ -320,9 +372,11 @@ fn close(s: &mut State) {
         s.alt_held = false;
         s.alt_swallowed = false;
         s.ctrl_held = false;
+        s.search_held = false;
     }
     s.typed.clear();
     s.selected = None;
+    s.active = None;
     s.search = None;
     s.edit = None;
     s.closing = None;
@@ -413,7 +467,13 @@ pub fn on_key(key: Key, down: bool) -> bool {
             return s.alt_swallowed;
         }
         Key::Ctrl => {
+            let pressed = down && !s.ctrl_held;
             s.ctrl_held = down;
+            if pressed && s.open && s.edit.is_none() {
+                select_active(&mut s);
+                s.closing = None;
+                emit(&s);
+            }
             return false;
         }
         _ => {}
@@ -427,7 +487,7 @@ pub fn on_key(key: Key, down: bool) -> bool {
             emit(&s);
             return true;
         }
-        return false;
+        if !matches!(key, Key::Enter | Key::HintWindow | Key::HintApp) { return false; }
     }
     // Any key but a second Del disarms a pending close; Esc then only cancels it.
     let armed = s.closing.take();
@@ -451,7 +511,7 @@ pub fn on_key(key: Key, down: bool) -> bool {
     match key {
         Key::Esc => close(&mut s),
         Key::Up | Key::Down => {
-            let matches: Vec<_> = s.wins.iter().filter(|w| w.key.starts_with(&s.typed)).map(|w| w.id).collect();
+            let matches: Vec<_> = ordered_hints(&s).into_iter().filter(|w| w.key.starts_with(&s.typed)).map(|w| w.id).collect();
             let current = selected_hint(&s).and_then(|id| matches.iter().position(|m| *m == id)).unwrap_or(0);
             let next = if key == Key::Up { current.saturating_sub(1) } else { (current + 1).min(matches.len().saturating_sub(1)) };
             s.selected = matches.get(next).copied();
@@ -508,13 +568,31 @@ pub fn on_key(key: Key, down: bool) -> bool {
     true
 }
 
+fn ordered_hints(s: &State) -> Vec<&Win> {
+    let mut wins: Vec<_> = s.wins.iter().collect();
+    if !s.typed.is_empty() {
+        // A partial hint usually means switching away from the active window.
+        wins.sort_by_key(|w| Some(w.id) == s.active);
+    }
+    wins
+}
+
 fn selected_hint(s: &State) -> Option<WinId> {
-    let matches: Vec<WinId> = s.wins.iter().filter(|w| w.key.starts_with(&s.typed)).map(|w| w.id).collect();
+    let matches: Vec<WinId> = ordered_hints(s).into_iter().filter(|w| w.key.starts_with(&s.typed)).map(|w| w.id).collect();
     if let Some(id) = s.selected.filter(|id| matches.contains(id)) {
         return Some(id);
     }
     // Nothing typed: the previous window, like Alt-Tab (the first row is the current one).
     matches.get(if s.typed.is_empty() { 1 } else { 0 }).or(matches.first()).copied()
+}
+
+fn select_active(s: &mut State) {
+    let Some(active) = s.active else { return };
+    if let Some(q) = s.search.as_mut() {
+        if let Some(i) = q.hits.iter().position(|(i, _)| s.wins[*i].id == active) { q.sel = i; }
+    } else if s.wins.iter().any(|w| w.id == active && w.key.starts_with(&s.typed)) {
+        s.selected = Some(active);
+    }
 }
 
 fn unique_hint(wins: &[Win], typed: &str) -> Option<WinId> {
@@ -599,6 +677,8 @@ fn on_edit_key(s: &mut State, key: Key) -> bool {
             match e.scope {
                 Scope::Window => {
                     s.custom.remove(&e.id);
+                    #[cfg(target_os = "linux")]
+                    persist_window_hints(&s.custom);
                 }
                 Scope::App => {
                     s.app_hints.remove(&app);
@@ -614,6 +694,8 @@ fn on_edit_key(s: &mut State, key: Key) -> bool {
                 (true, _) => {}
                 (false, Scope::Window) => {
                     s.custom.insert(e.id, e.keys.clone());
+                    #[cfg(target_os = "linux")]
+                    persist_window_hints(&s.custom);
                     finish_edit(s);
                 }
                 (false, Scope::App) => {
@@ -701,6 +783,113 @@ mod tests {
         for (symbol, digit) in ")!@#$%^&*(".chars().zip('0'..='9') {
             assert_eq!(Key::from_dom(&symbol.to_string()), Key::ShiftDigit(digit));
         }
+    }
+
+    #[test]
+    fn ctrl_hint_commands_keep_working_in_both_modes() {
+        let _guard = STATE_TEST.lock().unwrap();
+        for search in [false, true] {
+            let mut s = super::STATE.lock().unwrap();
+            super::close(&mut s);
+            s.open = true;
+            s.wins = vec![Win::new(1, "Code".into(), "Editor".into())];
+            s.wins[0].key = "c".into();
+            s.active = Some(1);
+            if search { super::open_search(&mut s); }
+            drop(s);
+            super::on_key(Key::Ctrl, true);
+            for (key, scope) in [(Key::HintWindow, super::Scope::Window), (Key::HintApp, super::Scope::App)] {
+                assert!(super::on_key(key, true));
+                let mut s = super::STATE.lock().unwrap();
+                assert!(s.edit.as_ref().is_some_and(|edit| edit.scope == scope && edit.id == 1));
+                s.edit = None;
+            }
+            super::close(&mut super::STATE.lock().unwrap());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn native_search_query_updates_results_without_replaying_keystrokes() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(2, "Console".into(), "Shell".into())];
+        super::open_search(&mut s);
+        drop(s);
+        super::set_query("Console".into());
+        {
+            let s = super::STATE.lock().unwrap();
+            let q = s.search.as_ref().unwrap();
+            assert_eq!(q.query, "Console");
+            assert_eq!(q.hits.len(), 1);
+            assert_eq!(s.wins[q.hits[q.sel].0].id, 2);
+        }
+        super::set_query("no such window".into());
+        assert!(super::STATE.lock().unwrap().search.as_ref().unwrap().hits.is_empty());
+        super::close(&mut super::STATE.lock().unwrap());
+    }
+
+    #[test]
+    fn partial_hints_prioritize_other_windows_but_ctrl_can_select_the_active_one() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        s.wins = vec![Win::new(1, "Floorp".into(), "Active".into()), Win::new(2, "Floorp".into(), "Other".into())];
+        s.wins[0].key = "fl".into();
+        s.wins[1].key = "fo".into();
+        s.active = Some(1);
+        drop(s);
+        super::on_key(Key::Char('f'), true);
+        {
+            let s = super::STATE.lock().unwrap();
+            assert_eq!(super::ordered_hints(&s).iter().map(|w| w.id).collect::<Vec<_>>(), vec![2, 1]);
+            assert_eq!(super::selected_hint(&s), Some(2));
+        }
+        super::on_key(Key::Down, true);
+        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(1));
+        super::on_key(Key::Up, true);
+        super::on_key(Key::Ctrl, true);
+        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(1));
+        let mut s = super::STATE.lock().unwrap();
+        s.typed = "fl".into();
+        s.selected = None;
+        assert_eq!(super::selected_hint(&s), Some(1), "a fully typed hint can still choose the active window");
+        super::close(&mut s);
+    }
+
+    #[test]
+    fn ctrl_selects_the_original_active_window_only_when_it_matches() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(2, "Console".into(), "Shell".into())];
+        s.wins[0].key = "x".into();
+        s.wins[1].key = "y".into();
+        s.active = Some(1);
+        assert_eq!(super::selected_hint(&s), Some(2));
+        drop(s);
+        super::on_key(Key::Ctrl, true);
+        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(1));
+        super::on_key(Key::Ctrl, false);
+        let mut s = super::STATE.lock().unwrap();
+        super::open_search(&mut s);
+        drop(s);
+        super::on_key(Key::Ctrl, true);
+        assert_eq!(super::STATE.lock().unwrap().search.as_ref().unwrap().sel, 0);
+        super::on_key(Key::Ctrl, false);
+        let mut s = super::STATE.lock().unwrap();
+        let hits = super::rank(&s.wins, "Console");
+        s.search = Some(super::Search { query: "Console".into(), sel: 0, hits });
+        drop(s);
+        super::on_key(Key::Ctrl, true);
+        let mut s = super::STATE.lock().unwrap();
+        let q = s.search.as_ref().unwrap();
+        assert_eq!(s.wins[q.hits[q.sel].0].id, 2, "Ctrl must not select a window outside the results");
+        super::close(&mut s);
     }
 
     #[test]
@@ -865,7 +1054,10 @@ mod tests {
         let mut s = super::STATE.lock().unwrap();
         s.alt_held = true;
         s.alt_swallowed = true;
+        s.ctrl_held = true;
+        s.search_held = true;
         super::close(&mut s);
         assert!(!s.alt_held && !s.alt_swallowed);
+        assert!(!s.ctrl_held && !s.search_held);
     }
 }
