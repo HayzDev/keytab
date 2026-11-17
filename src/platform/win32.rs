@@ -403,6 +403,7 @@ fn translate(vk: u32) -> Key {
         VK_DOWN => Key::Down,
         VK_DELETE => Key::Delete,
         VK_LMENU => Key::Alt,
+        VK_LCONTROL | VK_RCONTROL => Key::Ctrl,
         VK_SPACE => Key::Char(' '),
         VK_OEM_MINUS => Key::Char('-'),
         VK_OEM_PERIOD => Key::Char('.'),

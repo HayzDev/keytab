@@ -233,14 +233,14 @@
   }
 
   // The footer follows the state: same words everywhere, and only what works right now.
-  function renderFoot(search, preview, edit, rows, typed) {
+  function renderFoot(search, preview, edit, rows, typed, pinned) {
     const next = [...new Set(rows.filter(w => w.key.startsWith(typed) && w.key.length > typed.length)
       .map(w => w.key[typed.length].toUpperCase()))];
     $('foot').innerHTML =
       edit ? keys(['↵', 'save'], ['Del', 'reset to automatic'], ['Esc', 'back'])
       : search ? keys(['↑↓', 'select'], ['↵', 'open'], ['Del', 'close'], ['\\', 'set hint'], ['R⇧', 'hints'], ['Esc', 'dismiss'])
       : typed ? `<span>${next.map(c => `<kbd>${c}</kbd>`).join('<span class="or">or</span>')}to finish</span>` + keys(...(preview ? [['⇧', 'release to open']] : []), ['⌫', 'back'], ['Esc', 'dismiss'])
-      : preview ? keys(['↑↓', 'select'], ['⇧', 'release to open'], ['a–z 0–9', 'narrow'], ['Esc', 'dismiss'])
+      : preview ? keys(['↑↓', 'select'], ['⇧', 'release to open'], ['a–z 0–9', 'narrow'], ['Ctrl P', pinned ? 'unpin previews' : 'pin previews'], ['Esc', 'dismiss'])
       : keys(['a–z 0–9', 'type hint'], ['↑↓ ↵', 'select'], ['L⇧', 'preview'], ['R⇧ /', 'search'], ['Del', 'close'], ['\\', 'set hint'], ['Esc', 'dismiss']);
   }
 
@@ -282,7 +282,7 @@
   $('list').onscroll = sendLayout;
   new ResizeObserver(sendLayout).observe($('card'));
 
-  listen('view', ({ payload: { rows, typed, search, edit, dom_input, selected, preview } }) => {
+  listen('view', ({ payload: { rows, typed, search, edit, dom_input, selected, preview, pinned } }) => {
     domInput = dom_input;
     preview = preview && !edit;
     renderEdit(edit, rows);
@@ -292,7 +292,7 @@
     $('card').classList.toggle('previewing', preview);
     $('card').classList.toggle('typing', !search && typed.length > 0);
     $('query').textContent = search?.query ?? '';
-    renderFoot(search, preview, edit, rows, typed);
+    renderFoot(search, preview, edit, rows, typed, pinned);
 
     // Non-matching hints are hidden in every mode.
     const shown = search ? rows : rows.filter(w => w.key.startsWith(typed));
@@ -315,7 +315,8 @@
       return row;
     }));
 
-    const big = preview && !search && rows.find(w => w.id === selected);
+    // Shift held or Ctrl+P: one preview of the selected window, in hint and search mode.
+    const big = (preview || pinned) && !edit && rows.find(w => w.id === selected);
     $('preview').hidden = $('pcap').hidden = !big;
     if (big) {
       $('preview').dataset.id = big.id;

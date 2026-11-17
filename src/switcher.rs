@@ -30,6 +30,8 @@ pub enum Key {
     Up,
     Down,
     Delete,
+    /// Either Ctrl: held + p = keep previews on; other Ctrl combos pass through.
+    Ctrl,
     /// Left Alt: held + j/k = down/up.
     Alt,
     /// Hold Shift to inspect previews without immediately following a hint.
@@ -58,6 +60,7 @@ impl Key {
             "ArrowDown" => Key::Down,
             "Delete" => Key::Delete,
             "Alt" => Key::Alt,
+            "Control" => Key::Ctrl,
             "Shift" => Key::Preview,
             "\\" => Key::HintWindow,
             "|" => Key::HintApp,
@@ -121,6 +124,9 @@ struct State {
     preview_held: bool,
     /// Right Shift is down (so key repeat doesn't keep toggling search).
     search_held: bool,
+    ctrl_held: bool,
+    /// Ctrl+P: previews stay on without holding Shift, in every mode, until toggled off.
+    previews_pinned: bool,
     typed: String,
     selected: Option<WinId>,
     wins: Vec<Win>,
@@ -139,6 +145,8 @@ static STATE: Mutex<State> = Mutex::new(State {
     alt_swallowed: false,
     preview_held: false,
     search_held: false,
+    ctrl_held: false,
+    previews_pinned: false,
     typed: String::new(),
     selected: None,
     wins: Vec::new(),
@@ -209,7 +217,10 @@ pub(crate) struct View<'a> {
     pub(crate) edit: Option<&'a Edit>,
     /// True when the overlay has keyboard focus and the webview must forward keys.
     pub(crate) dom_input: bool,
+    /// Shift is held (hints wait for its release).
     pub(crate) preview: bool,
+    /// Ctrl+P has previews on regardless of Shift.
+    pub(crate) pinned: bool,
     pub(crate) selected: Option<WinId>,
 }
 
@@ -223,7 +234,7 @@ fn emit(s: &State) {
         None => (s.wins.iter().filter(|w| !s.preview_held || w.key.starts_with(&s.typed)).map(|w| Row { win: w, hits: &[] }).collect(), None),
     };
     let selected = s.search.as_ref().map_or_else(|| selected_hint(s), |q| q.hits.get(q.sel).map(|(i, _)| s.wins[*i].id));
-    let view = View { rows, typed: &s.typed, search, edit: s.edit.as_ref(), dom_input: !platform::GLOBAL_INPUT, preview: s.preview_held, selected };
+    let view = View { rows, typed: &s.typed, search, edit: s.edit.as_ref(), dom_input: !platform::GLOBAL_INPUT, preview: s.preview_held, pinned: s.previews_pinned, selected };
     #[cfg(windows)]
     let _ = _app.emit("view", view);
     #[cfg(target_os = "linux")]
@@ -296,6 +307,7 @@ fn close(s: &mut State) {
     if !platform::GLOBAL_INPUT {
         s.alt_held = false;
         s.alt_swallowed = false;
+        s.ctrl_held = false;
     }
     s.typed.clear();
     s.selected = None;
@@ -387,9 +399,21 @@ pub fn on_key(key: Key, down: bool) -> bool {
             }
             return s.alt_swallowed;
         }
+        Key::Ctrl => {
+            s.ctrl_held = down;
+            return false;
+        }
         _ => {}
     }
     if !s.open || !down {
+        return false;
+    }
+    if s.ctrl_held {
+        if key == Key::Char('p') && s.edit.is_none() {
+            s.previews_pinned = !s.previews_pinned;
+            emit(&s);
+            return true;
+        }
         return false;
     }
     let key = match key {
@@ -726,6 +750,26 @@ mod tests {
         assert!(super::on_key(Key::Slash, true), "swallowed in search too");
         let mut s = super::STATE.lock().unwrap();
         assert_eq!(s.search.as_ref().unwrap().query, "");
+        super::close(&mut s);
+    }
+
+    #[test]
+    fn ctrl_p_pins_previews_and_other_ctrl_keys_pass_through() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(2, "Paint".into(), "Art".into())];
+        s.wins[0].key = "c".into();
+        s.wins[1].key = "p".into();
+        drop(s);
+        super::on_key(Key::Ctrl, true);
+        assert!(super::on_key(Key::Char('p'), true), "Ctrl+P is ours");
+        assert!(!super::on_key(Key::Char('c'), true), "Ctrl+C goes to the app");
+        super::on_key(Key::Ctrl, false);
+        let mut s = super::STATE.lock().unwrap();
+        assert!(s.open && s.previews_pinned, "pinning previews doesn't jump to the P hint");
+        s.previews_pinned = false;
         super::close(&mut s);
     }
 

@@ -12,7 +12,8 @@ Inspired by [Adam Basis](https://www.youtube.com/@AdamBasis)'s alt-tab videos.
 | letters | focus the window with that hint (two letters when first letters clash) |
 | **Right Shift** (while open) | switch to search mode; press again to go back to hints |
 | `/` | switch from hints to search mode |
-| hold **Left Shift** | preview the selected window; release to focus a unique match |
+| hold **Left Shift** | preview the selected window; in hint mode, release to focus a unique match. Works in search too |
+| **Ctrl+P** | keep previews on without holding Shift (until pressed again or keytab restarts) |
 | Backspace | undo a typed letter / query character |
 | ↑ ↓ or **Alt+K / Alt+J** | move the selection in either mode |
 | Enter | focus the selected window in either mode |

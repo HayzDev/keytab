@@ -118,6 +118,7 @@ fn key(event: &gtk::gdk::EventKey) -> Key {
         "Down" => Key::Down,
         "Delete" | "KP_Delete" => Key::Delete,
         "Alt_L" | "Alt_R" => Key::Alt,
+        "Control_L" | "Control_R" => Key::Ctrl,
         "Shift_L" => Key::Preview,
         "Shift_R" => Key::Search,
         _ => event.keyval().to_unicode().map_or(Key::Other, |c| Key::from_dom(&c.to_string())),
@@ -230,11 +231,11 @@ pub(crate) fn render(view: &View<'_>) {
     UI.with(|ui| {
         let mut ui = ui.borrow_mut();
         let Some(ui) = ui.as_mut() else { return };
-        if !view.rows.is_empty() && !view.preview && view.search.is_none() && view.edit.is_none() {
+        if !view.rows.is_empty() && !(view.preview || view.pinned) && view.search.is_none() && view.edit.is_none() {
             ui.previews.retain(|id, _| view.rows.iter().any(|row| row.win.id == *id));
             ui.attempted.retain(|id, _| view.rows.iter().any(|row| row.win.id == *id));
         }
-        let preview = view.preview && view.edit.is_none() && (!view.rows.is_empty() || view.search.is_some());
+        let preview = (view.preview || view.pinned) && view.edit.is_none() && (!view.rows.is_empty() || view.search.is_some());
         if !preview {
             if let Some(cancel) = ui.capture.take() { cancel.store(true, Ordering::Relaxed); }
         } else if ui.capture.is_none() && !ui.capture_running {
