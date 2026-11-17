@@ -391,7 +391,7 @@ pub fn on_key(key: Key, down: bool) -> bool {
         Key::Esc => close(&mut s),
         Key::Up | Key::Down => {
             let matches: Vec<_> = s.wins.iter().filter(|w| w.key.starts_with(&s.typed)).map(|w| w.id).collect();
-            let current = matches.iter().position(|id| Some(*id) == s.selected).unwrap_or(0);
+            let current = selected_hint(&s).and_then(|id| matches.iter().position(|m| *m == id)).unwrap_or(0);
             let next = if key == Key::Up { current.saturating_sub(1) } else { (current + 1).min(matches.len().saturating_sub(1)) };
             s.selected = matches.get(next).copied();
             emit(&s);
@@ -442,9 +442,12 @@ pub fn on_key(key: Key, down: bool) -> bool {
 }
 
 fn selected_hint(s: &State) -> Option<WinId> {
-    let mut matches = s.wins.iter().filter(|w| w.key.starts_with(&s.typed));
-    let first = matches.next()?;
-    s.selected.filter(|id| *id == first.id || matches.any(|w| w.id == *id)).or(Some(first.id))
+    let matches: Vec<WinId> = s.wins.iter().filter(|w| w.key.starts_with(&s.typed)).map(|w| w.id).collect();
+    if let Some(id) = s.selected.filter(|id| matches.contains(id)) {
+        return Some(id);
+    }
+    // Nothing typed: the previous window, like Alt-Tab (the first row is the current one).
+    matches.get(if s.typed.is_empty() { 1 } else { 0 }).or(matches.first()).copied()
 }
 
 fn unique_hint(wins: &[Win], typed: &str) -> Option<WinId> {
@@ -622,10 +625,10 @@ mod tests {
         s.open = true;
         s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(2, "Console".into(), "Shell".into()), Win::new(3, "Discord".into(), "Chat".into())];
         for (win, hint) in s.wins.iter_mut().zip(["ca", "co", "d"]) { win.key = hint.into(); }
-        assert_eq!(super::selected_hint(&s), Some(1));
+        assert_eq!(super::selected_hint(&s), Some(2), "nothing typed selects the previous window");
         drop(s);
         super::on_key(Key::Down, true);
-        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(2));
+        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(3));
         super::on_key(Key::Char('c'), true);
         assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(1));
         super::on_key(Key::Down, true);
@@ -637,7 +640,7 @@ mod tests {
         super::on_key(Key::Back, true);
         let mut s = super::STATE.lock().unwrap();
         assert_eq!(s.typed, "");
-        assert_eq!(super::selected_hint(&s), Some(1));
+        assert_eq!(super::selected_hint(&s), Some(2));
         s.wins.clear();
         drop(s);
         super::on_key(Key::Down, true);

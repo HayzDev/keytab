@@ -6,30 +6,34 @@
 <style>
   :root {
     /* The window behind the card is acrylic-blurred (win32::init); this is the tint on top. */
-    --card: rgba(22, 24, 30, 0.72);
+    --card: rgba(19, 21, 27, 0.88);
     --line: rgba(255, 255, 255, 0.08);
-    --edge: rgba(255, 255, 255, 0.12);
+    --edge: rgba(255, 255, 255, 0.16);
     --text: #ededf2;
-    --muted: #9a9aa6;
-    --faint: #6c6c78;
-    --key-bg: rgba(255, 255, 255, 0.07);
+    --muted: #a8a8b3;
+    --faint: #8c8c98;
+    --key-bg: rgba(255, 255, 255, 0.11);
     --accent: #8ab4ff;
-    --hover: rgba(255, 255, 255, 0.03);
-    --sel: rgba(138, 180, 255, 0.2);
-    --well: rgba(0, 0, 0, 0.28);
+    --on-accent: #0d1424;
+    --sel: rgba(138, 180, 255, 0.26);
+    --custom: #f2c35b;
+    --field: rgba(255, 255, 255, 0.06);
+    --well: rgba(0, 0, 0, 0.3);
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --card: rgba(248, 248, 251, 0.80);
+      --card: rgba(248, 248, 251, 0.9);
       --line: rgba(0, 0, 0, 0.07);
-      --edge: rgba(0, 0, 0, 0.10);
+      --edge: rgba(0, 0, 0, 0.14);
       --text: #17171c;
-      --muted: #5f5f6b;
-      --faint: #8d8d98;
-      --key-bg: rgba(0, 0, 0, 0.055);
+      --muted: #55555f;
+      --faint: #6e6e79;
+      --key-bg: rgba(0, 0, 0, 0.07);
       --accent: #2f6bff;
-      --hover: rgba(0, 0, 0, 0.04);
-      --sel: rgba(47, 107, 255, 0.11);
+      --on-accent: #ffffff;
+      --sel: rgba(47, 107, 255, 0.16);
+      --custom: #c98a00;
+      --field: rgba(0, 0, 0, 0.04);
       --well: rgba(0, 0, 0, 0.06);
     }
   }
@@ -44,44 +48,59 @@
   #card {
     position: relative; width: 100%; display: flex; flex-direction: column;
     background: var(--card); border: 1px solid var(--edge); border-radius: 8px; overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
   #card[hidden] { display: none; }
 
-  #search { display: flex; align-items: center; gap: 10px; padding: 14px 16px; font-size: 16px; border-bottom: 1px solid var(--line); }
+  /* Search: an inset field with a steady caret (no animations by design). */
+  #search {
+    display: flex; align-items: center; gap: 10px; margin: 8px 8px 0; padding: 10px 12px;
+    border-radius: 6px; background: var(--field); font-size: 15px;
+  }
   #search[hidden] { display: none; }
   #search svg { flex: none; color: var(--muted); }
   #query { white-space: pre; }
-  #query:empty::before { content: "Search windows"; color: var(--faint); }
-  #caret { width: 1.5px; height: 1.2em; margin-left: -9px; background: var(--accent); animation: blink 1s steps(1) infinite; }
-  #query:not(:empty) + #caret { margin-left: -10px; }
-  @keyframes blink { 50% { opacity: 0; } }
+  #caret { position: relative; flex: none; width: 2px; height: 1.15em; margin-left: -9px; background: var(--accent); }
+  #query:empty + #caret { margin-left: -10px; }
+  #query:empty + #caret::after { content: "Search windows"; position: absolute; left: 8px; top: -1px; white-space: nowrap; color: var(--faint); }
 
   #list { max-height: 620px; overflow-y: auto; scrollbar-width: none; padding: 6px; display: flex; flex-direction: column; gap: 1px; }
   #list:empty { display: none; }
   .empty { padding: 18px 12px; color: var(--muted); text-align: center; }
+  /* Keyboard-first: no hover state, so the selection is the only highlighted row. */
   .row {
     display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px;
-    padding: 6px 10px; border: 0; border-radius: 8px; background: none;
+    padding: 6px 10px; border: 0; border-radius: 6px; background: none;
     color: inherit; font: inherit; text-align: left; cursor: default;
-    transition: opacity 90ms;
   }
-  .row:hover { background: var(--hover); }
-  .row.sel { background: var(--sel); }
-  .row.dim { opacity: 0.28; }
+  .row.sel { background: var(--sel); box-shadow: inset 2px 0 var(--accent); }
 
+  /* The hint chip is the thing you act on, so it carries the most contrast. */
   kbd {
-    flex: none; min-width: 2.5em; padding: 3px 5px; border-radius: 6px;
+    position: relative; flex: none; width: 3.4em; padding: 3px 0 3px 4px; border-radius: 5px;
     background: var(--key-bg); text-align: center;
-    font: 600 12.5px/1.2 "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
+    font: 700 13px/1.25 "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
     color: var(--text);
   }
-  .row.dim kbd { color: var(--muted); }
+  /* Hint progress, on every matching chip: typed letters recede, the keys still to press
+     turn accent. Blue fill is reserved for the selected row. */
   kbd .done { opacity: 0.35; }
-  .typing .row:not(.dim) kbd .next { color: var(--accent); text-decoration: underline 2px; text-underline-offset: 3px; }
-  /* User-set hints. Window (\): outlined. App (|, saved): accent-tinted fill. */
-  .row kbd.window { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent); }
-  .row kbd.app { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
-  .searching .row kbd { display: none; }
+  .typing kbd .rest { color: var(--accent); }
+  .row.sel kbd { background: var(--accent); color: var(--on-accent); }
+  .row.sel kbd .rest { color: inherit; }
+  .row.sel kbd .done { opacity: 0.55; }
+  /* Hints you set: an amber dot inside the chip. Filled = every window of the app (⇧\),
+     ring = this window only (\). */
+  kbd.app::before, kbd.window::before {
+    content: ""; position: absolute; left: 4px; top: calc(50% - 2.5px); width: 5px; height: 5px;
+    border-radius: 50%; background: var(--custom);
+  }
+
+  kbd.window::before { background: none; box-shadow: inset 0 0 0 1.5px var(--custom); }
+  .row.sel kbd.app::before { background: var(--on-accent); }
+  .row.sel kbd.window::before { box-shadow: inset 0 0 0 1.5px var(--on-accent); }
+  /* Search types into the query: chips go blank but keep their column, so nothing moves. */
+  .searching .row kbd { visibility: hidden; }
 
   .icon { flex: none; width: 20px; height: 20px; object-fit: contain; }
   .mono {
@@ -91,46 +110,50 @@
   .text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; }
   .app { flex: none; max-width: 45%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .title { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .m { color: var(--accent); font-weight: 700; }
+  .m { color: var(--accent); }
 
-  /* Shift previews: Windows draws a live DWM thumbnail over each .thumb box, cropped to
-     fill it. The box underneath only shows for windows with nothing to draw (minimized). */
-  .thumb {
-    flex: none; width: 96px; height: 60px; border-radius: 3px; background: var(--well);
+  /* Shift: one large live preview of the selected window under an unchanged list. Windows
+     draws it with DWM over this box; the box itself only shows when there's nothing to draw. */
+  #pcap { display: flex; align-items: center; gap: 8px; margin: 2px 16px 8px; color: var(--muted); font-size: 12.5px; }
+  #pcap[hidden] { display: none; }
+  #pcap kbd { width: auto; font-size: 11px; padding: 1px 5px; }
+  #preview {
+    margin: 0 6px 6px; border-radius: 6px; background: var(--well);
     display: grid; place-items: center; overflow: hidden;
   }
-  .thumb .icon, .thumb .mono { width: 26px; height: 26px; font-size: 14px; }
-  .row.big { flex-wrap: wrap; padding-bottom: 10px; }
-  .row.big .thumb { order: 9; width: 100%; }
-  .previewing #list { gap: 3px; }
+  #preview[hidden] { display: none; }
+  #preview .icon, #preview .mono { width: 40px; height: 40px; font-size: 20px; }
 
-  #foot {
-    display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; padding: 8px 12px 9px;
-    border-top: 1px solid var(--line); color: var(--faint); font-size: 11.5px; white-space: nowrap;
-  }
-  #foot kbd, #edit .help kbd { min-width: 0; padding: 1px 5px; font-size: 10.5px; font-weight: 600; color: var(--muted); margin-right: 3px; }
-  .editing #foot, .editing #list, .editing #search { display: none; }
+  /* Key legend: the same component in every mode. */
+  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .keys .dot { display: inline-block; width: 6px; height: 6px; margin: 0 5px 1px 2px; border-radius: 50%; background: var(--custom); }
+  .keys kbd { width: auto; min-width: 1.7em; padding: 1px 5px; margin-right: 5px; font-size: 12px; color: var(--text); }
+  .keys .or { margin: 0 5px 0 0; }
+  #foot { padding: 8px 16px 9px; border-top: 1px solid var(--line); }
+  .editing #list, .editing #search { display: none; }
 
-  #edit {
-    padding: 30px 20px 26px;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-    text-align: center;
-  }
+  /* The dialog sits on the same left edge as the rows. */
+  #edit { padding: 16px 18px 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 14px; }
   #edit[hidden] { display: none; }
-  #edit .label { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-  #edit .target { display: flex; align-items: center; gap: 8px; max-width: 100%; }
+  #edit .target { display: flex; align-items: baseline; gap: 8px; max-width: 100%; font-size: 15px; }
+  #edit .target .icon, #edit .target .mono { align-self: center; }
   #edit .target .app { max-width: none; }
-  #edit .target .title { flex: initial; }
-  #slots { display: flex; gap: 8px; }
+  #change { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 18px; }
+  #change > kbd { width: auto; display: inline-flex; align-items: center; justify-content: center; height: 48px; padding: 0 12px; font-size: 22px; color: var(--muted); }
+  #slots { display: flex; gap: 6px; }
+  /* Slots are big hint chips: filled when typed, outlined with a caret where you type next. */
   #slots span {
-    width: 44px; height: 52px; display: grid; place-items: center; border-radius: 10px;
-    background: var(--key-bg); font: 600 24px "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
+    position: relative; width: 42px; height: 48px; display: grid; place-items: center; border-radius: 7px;
+    background: var(--key-bg); font: 700 22px "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
   }
-  #slots span.on { box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent); }
-  #slots span.next { box-shadow: inset 0 0 0 1.5px var(--edge); }
-  #edit .err { color: #ff7b7b; font-size: 13px; }
+  #slots span.on { background: var(--accent); color: var(--on-accent); }
+  #slots span.next { background: none; box-shadow: inset 0 0 0 1.5px var(--accent); }
+  #slots span.empty { background: none; border: 1.5px dashed var(--edge); }
+  #slots span.next::after { content: ""; width: 1.5px; height: 20px; background: var(--accent); }
+  #e-note { font-size: 13px; color: var(--muted); }
+  #e-note:empty { display: none; }
+  #edit .err { color: #ff8a8a; font-size: 13px; }
   #edit .err:empty { display: none; }
-  #edit .help { color: var(--faint); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -140,14 +163,15 @@
     <span id="query"></span><span id="caret"></span>
   </div>
   <div id="list"></div>
-  <div id="foot"></div>
+  <div id="pcap" hidden></div>
+  <div id="preview" hidden></div>
   <div id="edit" hidden>
-    <div class="label" id="e-label"></div>
     <div class="target" id="e-target"></div>
-    <div id="slots"></div>
+    <div id="change"><kbd id="e-current"></kbd>→<div id="slots"></div></div>
+    <div id="e-note"></div>
     <div class="err" id="e-err"></div>
-    <div class="help" id="e-help"></div>
   </div>
+  <div id="foot" class="keys"></div>
 </div>
 <script>
   const { listen } = window.__TAURI__.event;
@@ -185,30 +209,39 @@
   }
 
   const MAX_HINT = 4;
-  const kbdHtml = k => `<kbd>${k}</kbd>`;
 
   function renderEdit(edit, wins) {
     $('edit').hidden = !edit;
     $('card').classList.toggle('editing', !!edit);
     if (!edit) return;
     const app = edit.scope === 'app';
-    $('e-label').textContent = app ? 'Hint for every window of this app · saved' : 'Hint for this window';
     const w = wins.find(w => w.id === edit.id) ?? { id: edit.id, app: edit.app };
-    const title = app ? '' : cleanTitle(edit.title, edit.app);
-    $('e-target').replaceChildren(icon(w), el('span', 'app', edit.app), ...(title ? [el('span', 'title', title)] : []));
+    const title = cleanTitle(edit.title, edit.app);
+    $('e-target').replaceChildren(icon(w),
+      el('span', 'app', app ? `Hint for all ${edit.app} windows` : `Hint for this ${edit.app} window`),
+      ...(!app && title ? [el('span', 'title', title)] : []));
+    const same = wins.filter(x => x.app === edit.app).length;
+    $('e-note').textContent = app && same > 1 && edit.keys
+      ? `${same === 2 ? 'Both' : `All ${same}`} ${edit.app} windows → ${Array.from({ length: same }, (_, i) => edit.keys.toUpperCase() + (i + 1)).join(', ')}`
+      : app ? '' : 'Press ⇧\\ instead to set it for every window of the app';
     const chars = [...edit.keys];
-    $('slots').replaceChildren(...Array.from({ length: MAX_HINT }, (_, i) =>
-      el('span', i < chars.length ? 'on' : i === chars.length ? 'next' : '', chars[i])));
+    $('slots').replaceChildren(...Array.from({ length: Math.min(MAX_HINT, Math.max(2, chars.length + 1)) }, (_, i) =>
+      el('span', i < chars.length ? 'on' : i === chars.length ? 'next' : 'empty', chars[i])));
+    $('e-current').textContent = edit.current || '–';
+    $('e-current').className = edit.kind;
     $('e-err').textContent = edit.error ?? '';
-    const now = `Now ${kbdHtml(edit.current || '–')}${{ window: ' (window hint)', app: ' (app hint)' }[edit.kind] ?? ''}`;
-    $('e-help').innerHTML = `${now} · ${kbdHtml('Enter')} save · ${kbdHtml('Del')} reset · ${kbdHtml('Esc')} back`;
   }
 
-  function renderFoot(search, preview) {
+  // The footer follows the state: same words everywhere, and only what works right now.
+  function renderFoot(search, preview, edit, rows, typed) {
+    const next = [...new Set(rows.filter(w => w.key.startsWith(typed) && w.key.length > typed.length)
+      .map(w => w.key[typed.length].toUpperCase()))];
     $('foot').innerHTML =
-      preview && !search ? keys(['a–z', 'narrow'], ['↑↓', 'select'], ['⇧', 'release to open'])
-      : search ? keys(['↑↓', 'select'], ['Enter', 'open'], ['Del', 'close window'], ['\\', 'hint'], ['|', 'app hint'], ['Esc', 'close'])
-      : keys(['Shift', 'previews'], ['↑↓', 'select'], ['Del', 'close window'], ['\\', 'hint'], ['|', 'app hint'], ['Esc', 'close']);
+      edit ? keys(['↵', 'save'], ['Del', 'reset to automatic'], ['Esc', 'back'])
+      : search ? keys(['↑↓', 'select'], ['↵', 'open'], ['Del', 'close'], ['\\', 'set hint'], ['Esc', 'dismiss'])
+      : typed ? `<span>${next.map(c => `<kbd>${c}</kbd>`).join('<span class="or">or</span>')}to finish</span>` + keys(...(preview ? [['⇧', 'release to open']] : []), ['⌫', 'back'], ['Esc', 'dismiss'])
+      : preview ? keys(['↑↓', 'select'], ['⇧', 'release to open'], ['a–z 0–9', 'narrow'], ['Esc', 'dismiss'])
+      : keys(['a–z 0–9', 'type hint'], ['↑↓', 'select'], ['↵', 'open'], ['⇧', 'preview'], ['Del', 'close'], ['\\', 'set hint'], ['Esc', 'dismiss']);
   }
 
   // Where there's no global keyboard hook (Wayland), the overlay has focus and forwards
@@ -229,11 +262,8 @@
   function sendLayout() {
     if (domInput) return;
     const card = $('card').hidden ? null : (r => [r.x, r.y, r.width, r.height])($('card').getBoundingClientRect());
-    const list = $('list').getBoundingClientRect();
-    const thumbs = [...document.querySelectorAll('.thumb')].flatMap(t => {
-      const r = t.getBoundingClientRect();
-      return r.top >= list.top - 1 && r.bottom <= list.bottom + 1 ? [[+t.dataset.id, r.x, r.y, r.width, r.height]] : [];
-    });
+    const p = $('preview');
+    const thumbs = p.hidden ? [] : (r => [[+p.dataset.id, r.x, r.y, r.width, r.height]])(p.getBoundingClientRect());
     const json = JSON.stringify([card, thumbs]);
     if (json === sentLayout) return;
     sentLayout = json;
@@ -244,10 +274,10 @@
     });
   }
   function sizeBig() {
-    const t = document.querySelector('.row.big .thumb');
-    if (!t) return;
-    const a = aspects.get(+t.dataset.id) || 16 / 10;
-    t.style.height = `${Math.round(Math.min(330, Math.max(150, t.clientWidth / a)))}px`;
+    const p = $('preview');
+    if (p.hidden) return;
+    const a = aspects.get(+p.dataset.id) || 16 / 10;
+    p.style.height = `${Math.round(Math.min(320, Math.max(160, p.clientWidth / a)))}px`;
   }
   $('list').onscroll = sendLayout;
   new ResizeObserver(sendLayout).observe($('card'));
@@ -262,19 +292,18 @@
     $('card').classList.toggle('previewing', preview);
     $('card').classList.toggle('typing', !search && typed.length > 0);
     $('query').textContent = search?.query ?? '';
-    renderFoot(search, preview);
+    renderFoot(search, preview, edit, rows, typed);
 
-    $('list').replaceChildren(...rows.map(w => {
-      const match = !search && w.key.startsWith(typed);
+    // Non-matching hints are hidden in every mode.
+    const shown = search ? rows : rows.filter(w => w.key.startsWith(typed));
+    $('list').replaceChildren(...shown.map(w => {
       const row = el('button', 'row');
-      row.classList.toggle('dim', !search && !match);
       row.classList.toggle('sel', w.id === selected);
       row.onclick = e => { e.stopPropagation(); invoke('activate', { id: w.id }); };
 
       const kbd = el('kbd', w.kind);
-      // Per char: already typed (faded) / the one to press next (accent).
-      const n = match ? typed.length : 0;
-      kbd.append(...[...w.key].map((c, i) => el('span', i < n ? 'done' : i === n ? 'next' : '', c)));
+      // Typed letters recede; the rest is what to press next.
+      kbd.append(...[...w.key].map((c, i) => el('span', i < typed.length ? 'done' : 'rest', c)));
 
       // Hit indices are char positions in "app title" (or just "app" when title == app).
       const hits = new Set(w.hits);
@@ -283,15 +312,16 @@
       const title = cleanTitle(w.title, w.app);
       if (title) text.append(highlight(el('span', 'title'), title, hits, [...w.app].length + 1));
       row.append(kbd, icon(w), text);
-      if (preview) {
-        const thumb = el('div', 'thumb');
-        thumb.dataset.id = w.id;
-        thumb.append(icon(w));
-        row.prepend(thumb);
-        row.classList.toggle('big', !search && typed.length > 0 && w.id === selected);
-      }
       return row;
     }));
+
+    const big = preview && !search && rows.find(w => w.id === selected);
+    $('preview').hidden = $('pcap').hidden = !big;
+    if (big) {
+      $('preview').dataset.id = big.id;
+      $('preview').replaceChildren(icon(big));
+      $('pcap').replaceChildren(el('kbd', '', big.key), el('span', '', `Preview · ${big.app}`));
+    }
 
     if (search && rows.length === 0) $('list').replaceChildren(el('div', 'empty', 'No matching windows'));
     sizeBig();

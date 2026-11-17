@@ -288,7 +288,16 @@ pub fn show(overlay: &WebviewWindow) {
     let h = HWND(h.0 as *mut _);
     OPEN.store(true, Ordering::Relaxed);
     unsafe {
-        let _ = SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        // Centered sideways on the active window's monitor, top edge at 22% of its height.
+        // The height follows the card (`layout`), so it grows downward from there.
+        let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let mut win = RECT::default();
+        let _ = GetMonitorInfoW(MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY), &mut mi);
+        let _ = GetWindowRect(h, &mut win);
+        let w = mi.rcWork;
+        let x = w.left + (w.right - w.left - (win.right - win.left)) / 2;
+        let y = w.top + (w.bottom - w.top) * 22 / 100;
+        let _ = SetWindowPos(h, Some(HWND_TOPMOST), x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
         let _ = ShowWindowAsync(h, SW_SHOWNOACTIVATE);
     }
 }
