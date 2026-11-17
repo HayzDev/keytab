@@ -8,7 +8,7 @@ use crate::switcher::{on_key, Key};
 use tauri::WebviewWindow;
 use windows::core::{BOOL, PWSTR};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::Mutex;
 use windows::core::{s, w, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM};
@@ -16,6 +16,7 @@ use windows::Win32::Graphics::Dwm::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
@@ -67,17 +68,19 @@ unsafe fn info(h: HWND, skip_pid: u32) -> Option<Win> {
     if cloaked != 0 {
         return None;
     }
+    // Before GetWindowTextW: for our own windows it sends WM_GETTEXT to the UI thread and
+    // waits, and this runs on the hook thread.
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(h, Some(&mut pid));
+    if pid == skip_pid {
+        return None;
+    }
     let mut buf = [0u16; 512];
     let n = GetWindowTextW(h, &mut buf);
     if n <= 0 {
         return None;
     }
     let title = String::from_utf16_lossy(&buf[..n as usize]);
-    let mut pid = 0u32;
-    GetWindowThreadProcessId(h, Some(&mut pid));
-    if pid == skip_pid {
-        return None;
-    }
     // UWP apps all live in ApplicationFrameHost; their title is the better name.
     let app = match exe_path(pid) {
         Some(p) if !p.to_lowercase().ends_with("\\applicationframehost.exe") => app_name(&p),
@@ -267,6 +270,7 @@ struct CompositionData {
 /// regions, so `layout` sizes the window to the card and Windows 11 rounds its corners.
 pub fn init(overlay: &WebviewWindow) -> tauri::Result<()> {
     let h = HWND(overlay.hwnd()?.0 as _);
+    OVERLAY.store(h.0 as isize, Ordering::Relaxed);
     unsafe {
         let round = DWMWCP_ROUND;
         let _ = DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &round as *const _ as _, size_of_val(&round) as u32);
@@ -281,11 +285,21 @@ pub fn init(overlay: &WebviewWindow) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Topmost, without taking focus: the hook already gets the keys. Async because this
-/// runs inside the hook callback, which must not block on the UI thread.
-pub fn show(overlay: &WebviewWindow) {
-    let Ok(h) = overlay.hwnd() else { return };
-    let h = HWND(h.0 as *mut _);
+/// The overlay's HWND, cached by `init`. Everything below runs on the hook thread or other
+/// background threads, so it must never call Tauri window getters (`hwnd()`,
+/// `scale_factor()`, ...): those post to the UI thread and wait for the answer. A hook thread
+/// waiting on a busy or deadlocked UI thread stalls every keypress and mouse move on the PC,
+/// and Windows then kills the hung app. Plain Win32 calls are safe from any thread.
+static OVERLAY: AtomicIsize = AtomicIsize::new(0);
+
+fn overlay() -> HWND {
+    HWND(OVERLAY.load(Ordering::Relaxed) as *mut _)
+}
+
+/// Topmost, without taking focus: the hook already gets the keys. Async positioning and
+/// showing, because this runs inside the hook callback and the window belongs to the UI thread.
+pub fn show(_overlay: &WebviewWindow) {
+    let h = overlay();
     OPEN.store(true, Ordering::Relaxed);
     unsafe {
         // Centered sideways on the active window's monitor, top edge at 22% of its height.
@@ -297,17 +311,16 @@ pub fn show(overlay: &WebviewWindow) {
         let w = mi.rcWork;
         let x = w.left + (w.right - w.left - (win.right - win.left)) / 2;
         let y = w.top + (w.bottom - w.top) * 22 / 100;
-        let _ = SetWindowPos(h, Some(HWND_TOPMOST), x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+        let _ = SetWindowPos(h, Some(HWND_TOPMOST), x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
         let _ = ShowWindowAsync(h, SW_SHOWNOACTIVATE);
     }
 }
 
-pub fn hide(overlay: &WebviewWindow) {
+pub fn hide(_overlay: &WebviewWindow) {
     OPEN.store(false, Ordering::Relaxed);
-    layout(overlay, None, &[]);
-    let Ok(h) = overlay.hwnd() else { return };
+    layout(None, &[]);
     unsafe {
-        let _ = ShowWindowAsync(HWND(h.0 as *mut _), SW_HIDE);
+        let _ = ShowWindowAsync(overlay(), SW_HIDE);
     }
 }
 
@@ -317,7 +330,7 @@ static THUMBS: Mutex<Vec<(WinId, isize)>> = Mutex::new(Vec::new());
 /// The webview's layout, in CSS px: the card (the window is sized to it, keeping its top
 /// left corner) and the preview boxes, each filled with a cropped live thumbnail. Returns each
 /// preview's aspect ratio (0 if it has nothing to show, e.g. minimized).
-pub fn layout(overlay: &WebviewWindow, card: Option<(f64, f64, f64, f64)>, rects: &[(WinId, f64, f64, f64, f64)]) -> Vec<(WinId, f64)> {
+pub fn layout(card: Option<(f64, f64, f64, f64)>, rects: &[(WinId, f64, f64, f64, f64)]) -> Vec<(WinId, f64)> {
     let mut thumbs = THUMBS.lock().unwrap();
     thumbs.retain(|&(id, t)| {
         let keep = rects.iter().any(|r| r.0 == id);
@@ -326,9 +339,11 @@ pub fn layout(overlay: &WebviewWindow, card: Option<(f64, f64, f64, f64)>, rects
         }
         keep
     });
-    let Ok(dest) = overlay.hwnd() else { return vec![] };
-    let dest = HWND(dest.0 as *mut _);
-    let scale = overlay.scale_factor().unwrap_or(1.0);
+    let dest = overlay();
+    let scale = match unsafe { GetDpiForWindow(dest) } {
+        0 => 1.0,
+        dpi => dpi as f64 / 96.0,
+    };
     let px = |v: f64| (v * scale).round() as i32;
 
     if let Some((_, _, w, h)) = card {

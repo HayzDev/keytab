@@ -33,12 +33,8 @@ fn ready() {
 /// Where the webview put the card and the Shift preview boxes, in CSS px.
 #[cfg(windows)]
 #[tauri::command]
-fn layout(
-    window: tauri::WebviewWindow,
-    card: Option<(f64, f64, f64, f64)>,
-    thumbs: Vec<(keys::WinId, f64, f64, f64, f64)>,
-) -> Vec<(keys::WinId, f64)> {
-    platform::layout(&window, card, &thumbs)
+fn layout(card: Option<(f64, f64, f64, f64)>, thumbs: Vec<(keys::WinId, f64, f64, f64, f64)>) -> Vec<(keys::WinId, f64)> {
+    platform::layout(card, &thumbs)
 }
 
 /// `keytab --toggle` / `keytab --search`, for compositor keybinds.
@@ -88,14 +84,17 @@ fn main() {
     let builder = builder.invoke_handler(tauri::generate_handler![activate, hide, key, ready]);
     // App icons for the webview: http://icon.localhost/<window id>.
     #[cfg(windows)]
-    let builder = builder.register_uri_scheme_protocol("icon", |_ctx, req| {
-        let png = req.uri().path().trim_start_matches('/').parse().ok().and_then(platform::icon_png);
-        let res = tauri::http::Response::builder();
-        match png {
-            Some(png) => res.header("Content-Type", "image/png").body(std::borrow::Cow::Owned(png)),
-            None => res.status(404).body(std::borrow::Cow::Borrowed(&[][..])),
-        }
-        .unwrap()
+    // Off the UI thread: WM_GETICON waits (up to 100ms) on each app, and a busy app must
+    // never stall the overlay.
+    let builder = builder.register_asynchronous_uri_scheme_protocol("icon", |_ctx, req, responder| {
+        let id = req.uri().path().trim_start_matches('/').parse().ok();
+        std::thread::spawn(move || {
+            let res = tauri::http::Response::builder();
+            responder.respond(match id.and_then(platform::icon_png) {
+                Some(png) => res.header("Content-Type", "image/png").body(png).unwrap(),
+                None => res.status(404).body(Vec::new()).unwrap(),
+            });
+        });
     });
 
     builder
