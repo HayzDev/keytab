@@ -75,7 +75,7 @@
     padding: 6px 10px; border: 0; border-radius: 6px; background: none;
     color: inherit; font: inherit; text-align: left; cursor: default;
   }
-  .row.sel { background: var(--sel); box-shadow: inset 2px 0 var(--accent); }
+  .row.sel { background: var(--sel); }
 
   /* The hint chip is the thing you act on, so it carries the most contrast. */
   kbd {
@@ -106,7 +106,8 @@
   .text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; }
   .app { flex: none; max-width: 45%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .title { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .m { color: var(--accent); }
+  /* Matches are underlined as well as tinted, so they don't rely on color alone. */
+  .m { color: var(--accent); text-decoration: underline 1.5px; text-underline-offset: 3px; }
 
   /* Shift: one large live preview of the selected window under an unchanged list. Windows
      draws it with DWM over this box; the box itself only shows when there's nothing to draw. */
@@ -126,6 +127,7 @@
   .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
   .keys kbd { width: auto; min-width: 1.7em; padding: 1px 5px; margin-right: 5px; font-size: 12px; color: var(--text); }
   .keys .or { margin: 0 5px 0 0; }
+  .keys .aux { margin-left: auto; display: flex; gap: inherit; }
   #foot { padding: 8px 16px 9px; border-top: 1px solid var(--line); }
   .editing #list, .editing #search { display: none; }
 
@@ -237,13 +239,15 @@
     // Shift release opens only a hint that's fully typed (switcher::unique_hint).
     const pin = ['Ctrl P', pinned ? 'unpin previews' : 'pin previews'];
     const peek = pinned ? pin : ['L⇧', 'preview'];
+    // Universal keys (↑↓, Esc) go unlisted; actions on the selected window sit apart on the right.
+    const aux = `<span class="aux">${keys(['\\', 'set hint'], ['Del', 'close'])}</span>`;
     $('foot').innerHTML =
       edit ? keys(['↵', 'save'], ['Del', 'reset to automatic'], ['Esc', 'back'])
-      : search ? keys(['↑↓', 'select'], ['↵', 'open'], peek, ['Del', 'close'], ['\\', 'set hint'], ['R⇧', 'hints'], ['Esc', 'dismiss'])
+      : search ? keys(['↵', 'open'], peek, ['R⇧', 'hints']) + aux
       : typed ? (next.length ? `<span>${next.map(c => `<kbd>${c}</kbd>`).join('<span class="or">or</span>')}to finish</span>` : keys(['⇧', 'release to open']))
-        + keys(['↑↓', 'select'], ['↵', 'open'], ['⌫', 'back'], ['Esc', 'dismiss'])
-      : preview ? keys(['↑↓', 'select'], ['↵', 'open'], ['a–z 0–9', 'hint'], pin, ['Esc', 'dismiss'])
-      : keys(['a–z 0–9', 'hint'], ['↑↓', 'select'], ['↵', 'open'], peek, ['R⇧ /', 'search'], ['Del', 'close'], ['\\', 'set hint'], ['Esc', 'dismiss']);
+        + keys(['↵', 'open'], ['⌫', 'back'])
+      : preview ? keys(['↵', 'open'], ['a–z 0–9', 'hint'], pin)
+      : keys(['a–z 0–9', 'hint'], ['↵', 'open'], peek, ['R⇧ /', 'search']) + aux;
   }
 
   // Where there's no global keyboard hook (Wayland), the overlay has focus and forwards
