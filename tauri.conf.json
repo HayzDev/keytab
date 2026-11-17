@@ -11,7 +11,7 @@
         "label": "main",
         "create": false,
         "title": "keytab",
-        "width": 640,
+        "width": 600,
         "height": 720,
         "center": true,
         "visible": false,

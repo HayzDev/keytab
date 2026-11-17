@@ -317,7 +317,8 @@ pub fn search() {
     open_search(&mut STATE.lock().unwrap());
 }
 pub fn hide() {
-    close(&mut STATE.lock().unwrap());
+    let mut s = STATE.lock().unwrap();
+    if s.open { close(&mut s) }
 }
 pub fn activate(id: WinId) {
     switch_to(&mut STATE.lock().unwrap(), id);
@@ -402,6 +403,15 @@ pub fn on_key(key: Key, down: bool) -> bool {
             s.typed.pop();
             s.selected = None;
             emit(&s);
+        }
+        Key::Delete => {
+            if let Some(id) = selected_hint(&s) {
+                platform::close(id);
+                s.wins.retain(|w| w.id != id);
+                s.typed.clear();
+                s.selected = None;
+                if s.wins.is_empty() { close(&mut s) } else { emit(&s) }
+            }
         }
         Key::Char(c) if c.is_ascii_alphanumeric() => {
             let typed = format!("{}{c}", s.typed);

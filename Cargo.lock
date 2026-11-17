@@ -1946,6 +1946,7 @@ dependencies = [
  "gtk",
  "gtk-layer-shell",
  "pkg-config",
+ "png",
  "serde",
  "serde_json",
  "tauri",

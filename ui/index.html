@@ -5,108 +5,132 @@
 <title>keytab</title>
 <style>
   :root {
-    --card: rgba(11, 14, 20, 0.88);
-    --line: rgba(42, 53, 76, 0.95);
-    --text: #ececf1;
-    --muted: #8b8b96;
-    --key-bg: rgba(255, 255, 255, 0.06);
+    /* The window behind the card is acrylic-blurred (win32::init); this is the tint on top. */
+    --card: rgba(22, 24, 30, 0.72);
+    --line: rgba(255, 255, 255, 0.08);
+    --edge: rgba(255, 255, 255, 0.12);
+    --text: #ededf2;
+    --muted: #9a9aa6;
+    --faint: #6c6c78;
+    --key-bg: rgba(255, 255, 255, 0.07);
     --accent: #8ab4ff;
-    --hover: rgba(255, 255, 255, 0.05);
-    --sel: rgba(138, 180, 255, 0.14);
+    --hover: rgba(255, 255, 255, 0.03);
+    --sel: rgba(138, 180, 255, 0.2);
+    --well: rgba(0, 0, 0, 0.28);
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --card: rgba(250, 250, 252, 0.98);
+      --card: rgba(248, 248, 251, 0.80);
       --line: rgba(0, 0, 0, 0.07);
+      --edge: rgba(0, 0, 0, 0.10);
       --text: #17171c;
-      --muted: #6b6b76;
-      --key-bg: rgba(0, 0, 0, 0.05);
+      --muted: #5f5f6b;
+      --faint: #8d8d98;
+      --key-bg: rgba(0, 0, 0, 0.055);
       --accent: #2f6bff;
       --hover: rgba(0, 0, 0, 0.04);
-      --sel: rgba(47, 107, 255, 0.10);
+      --sel: rgba(47, 107, 255, 0.11);
+      --well: rgba(0, 0, 0, 0.06);
     }
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; background: transparent; overflow: hidden; user-select: none; }
+  /* Windows sizes the window to the card (win32::layout), keeping its top edge, so the
+     card grows downward instead of jumping. Its height must not depend on the window's. */
   body {
-    display: grid; place-items: center; padding: 24px;
     font: 14px/1.3 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
     color: var(--text);
   }
   #card {
-    width: 100%; max-height: 100%; display: flex; flex-direction: column;
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    position: relative; width: 100%; display: flex; flex-direction: column;
+    background: var(--card); border: 1px solid var(--edge); border-radius: 8px; overflow: hidden;
   }
   #card[hidden] { display: none; }
-  #search {
-    display: flex; align-items: center; gap: 10px;
-    padding: 14px 16px;
-    font-size: 16px;
-  }
+
+  #search { display: flex; align-items: center; gap: 10px; padding: 14px 16px; font-size: 16px; border-bottom: 1px solid var(--line); }
   #search[hidden] { display: none; }
   #search svg { flex: none; color: var(--muted); }
-  #query:empty::before { content: "Search windows"; color: var(--muted); }
-  #caret { width: 1.5px; height: 1.2em; margin-left: -8px; background: var(--accent); animation: blink 1s steps(1) infinite; }
+  #query { white-space: pre; }
+  #query:empty::before { content: "Search windows"; color: var(--faint); }
+  #caret { width: 1.5px; height: 1.2em; margin-left: -9px; background: var(--accent); animation: blink 1s steps(1) infinite; }
+  #query:not(:empty) + #caret { margin-left: -10px; }
   @keyframes blink { 50% { opacity: 0; } }
-  #list { overflow-y: auto; scrollbar-width: none; padding: 6px; }
+
+  #list { max-height: 620px; overflow-y: auto; scrollbar-width: none; padding: 6px; display: flex; flex-direction: column; gap: 1px; }
   #list:empty { display: none; }
-  .empty { padding: 8px 10px; color: var(--muted); }
+  .empty { padding: 18px 12px; color: var(--muted); text-align: center; }
   .row {
-    display: flex; align-items: center; gap: 12px; width: 100%;
-    padding: 8px 10px; border: 0; border-radius: 9px; background: none;
+    display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px;
+    padding: 6px 10px; border: 0; border-radius: 8px; background: none;
     color: inherit; font: inherit; text-align: left; cursor: default;
-    transition: opacity 80ms;
+    transition: opacity 90ms;
   }
   .row:hover { background: var(--hover); }
   .row.sel { background: var(--sel); }
-  .row.dim { opacity: 0.25; }
-  /* Shift previews: Windows draws a live DWM thumbnail over each box (see thumbs()). */
-  .thumb { flex: none; width: 104px; height: 66px; border-radius: 6px; background: var(--key-bg);
-    display: grid; place-items: center; color: var(--muted); font-size: 11px; }
-  .row.big { flex-wrap: wrap; }
-  .row.big .thumb { order: 9; width: 100%; height: 240px; }
+  .row.dim { opacity: 0.28; }
+
   kbd {
-    flex: none; min-width: 2.4em; padding: 3px 0; border-radius: 6px;
+    flex: none; min-width: 2.5em; padding: 3px 5px; border-radius: 6px;
     background: var(--key-bg); text-align: center;
-    font: 600 13px/1.2 "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
-    color: var(--muted);
+    font: 600 12.5px/1.2 "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
+    color: var(--text);
   }
-  kbd .done { opacity: 0.3; }
-  kbd .later { opacity: 0.45; }
-  .typing .row:not(.dim) kbd .next {
-    color: var(--accent); text-decoration: underline 2px; text-underline-offset: 3px;
-  }
-  .row:not(.dim) kbd { color: var(--text); }
+  .row.dim kbd { color: var(--muted); }
+  kbd .done { opacity: 0.35; }
+  .typing .row:not(.dim) kbd .next { color: var(--accent); text-decoration: underline 2px; text-underline-offset: 3px; }
   /* User-set hints. Window (\): outlined. App (|, saved): accent-tinted fill. */
   .row kbd.window { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent); }
   .row kbd.app { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+  .searching .row kbd { display: none; }
 
-  #card { position: relative; }
-  #card.editing { min-height: 240px; }
-  #card.editing > #list, #card.editing > #search { visibility: hidden; }
+  .icon { flex: none; width: 20px; height: 20px; object-fit: contain; }
+  .mono {
+    flex: none; width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center;
+    font-size: 11.5px; font-weight: 700; color: #fff; background: hsl(var(--hue) 45% 42%);
+  }
+  .text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; }
+  .app { flex: none; max-width: 45%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .title { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .m { color: var(--accent); font-weight: 700; }
+
+  /* Shift previews: Windows draws a live DWM thumbnail over each .thumb box, cropped to
+     fill it. The box underneath only shows for windows with nothing to draw (minimized). */
+  .thumb {
+    flex: none; width: 96px; height: 60px; border-radius: 3px; background: var(--well);
+    display: grid; place-items: center; overflow: hidden;
+  }
+  .thumb .icon, .thumb .mono { width: 26px; height: 26px; font-size: 14px; }
+  .row.big { flex-wrap: wrap; padding-bottom: 10px; }
+  .row.big .thumb { order: 9; width: 100%; }
+  .previewing #list { gap: 3px; }
+
+  #foot {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; padding: 8px 12px 9px;
+    border-top: 1px solid var(--line); color: var(--faint); font-size: 11.5px; white-space: nowrap;
+  }
+  #foot kbd, #edit .help kbd { min-width: 0; padding: 1px 5px; font-size: 10.5px; font-weight: 600; color: var(--muted); margin-right: 3px; }
+  .editing #foot, .editing #list, .editing #search { display: none; }
+
   #edit {
-    position: absolute; inset: 0; z-index: 1; border-radius: inherit;
+    padding: 30px 20px 26px;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-    padding: 20px; text-align: center;
+    text-align: center;
   }
   #edit[hidden] { display: none; }
-  #edit .label { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-  #edit .target { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #edit .target .title { margin-left: 6px; }
+  #edit .label { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  #edit .target { display: flex; align-items: center; gap: 8px; max-width: 100%; }
+  #edit .target .app { max-width: none; }
+  #edit .target .title { flex: initial; }
   #slots { display: flex; gap: 8px; }
   #slots span {
     width: 44px; height: 52px; display: grid; place-items: center; border-radius: 10px;
     background: var(--key-bg); font: 600 24px "Cascadia Mono", Consolas, monospace; text-transform: uppercase;
   }
   #slots span.on { box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent); }
-  #slots span.next { box-shadow: inset 0 0 0 1.5px var(--line); }
-  #edit .err { color: #ff7b7b; font-size: 13px; min-height: 1.3em; }
-  #edit .help { color: var(--muted); font-size: 12px; }
-  #edit .help kbd { min-width: 0; padding: 1px 6px; font-size: 11px; color: var(--text); }
-  .searching kbd { display: none; }
-  .app { flex: none; font-weight: 600; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .title { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .m { color: var(--accent); font-weight: 700; }
+  #slots span.next { box-shadow: inset 0 0 0 1.5px var(--edge); }
+  #edit .err { color: #ff7b7b; font-size: 13px; }
+  #edit .err:empty { display: none; }
+  #edit .help { color: var(--faint); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -116,9 +140,10 @@
     <span id="query"></span><span id="caret"></span>
   </div>
   <div id="list"></div>
+  <div id="foot"></div>
   <div id="edit" hidden>
     <div class="label" id="e-label"></div>
-    <div class="target"><span class="app" id="e-app"></span><span class="title" id="e-title"></span></div>
+    <div class="target" id="e-target"></div>
     <div id="slots"></div>
     <div class="err" id="e-err"></div>
     <div class="help" id="e-help"></div>
@@ -129,31 +154,61 @@
   const { invoke } = window.__TAURI__.core;
   const $ = id => document.getElementById(id);
   const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text ?? '' });
+  const keys = (...pairs) => pairs.map(([k, what]) => `<span><kbd>${k}</kbd>${what}</span>`).join('');
 
   // Wrap matched char positions [offset, offset+len) of `text` in <span class=m>.
   function highlight(span, text, hits, offset) {
-    const chars = [...text];
-    chars.forEach((c, i) => span.append(hits.has(i + offset) ? el('span', 'm', c) : c));
+    [...text].forEach((c, i) => span.append(hits.has(i + offset) ? el('span', 'm', c) : c));
     return span;
+  }
+
+  // "Video - YouTube - Vivaldi" -> "Video - YouTube": the app name is already shown.
+  function cleanTitle(title, app) {
+    if (title.toLowerCase() === app.toLowerCase()) return '';
+    // Drop a last " - …" segment naming the app ("Downloads - File Explorer" for Explorer).
+    const m = title.match(/^(.+?)\s[-—–|]\s([^-—–|]+)$/);
+    return m && m[2].toLowerCase().includes(app.toLowerCase()) ? m[1] : title;
+  }
+
+  // App icon from the `icon` protocol (win32::icon_png); a colored monogram if there is none.
+  function icon(w) {
+    const mono = () => {
+      const m = el('span', 'mono', [...w.app][0]?.toUpperCase());
+      m.style.setProperty('--hue', [...w.app.toLowerCase()].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7));
+      return m;
+    };
+    if (domInput) return mono();
+    const img = el('img', 'icon');
+    img.src = `http://icon.localhost/${w.id}`;
+    img.onerror = () => img.replaceWith(mono());
+    return img;
   }
 
   const MAX_HINT = 4;
   const kbdHtml = k => `<kbd>${k}</kbd>`;
 
-  function renderEdit(edit) {
+  function renderEdit(edit, wins) {
     $('edit').hidden = !edit;
     $('card').classList.toggle('editing', !!edit);
     if (!edit) return;
     const app = edit.scope === 'app';
     $('e-label').textContent = app ? 'Hint for every window of this app · saved' : 'Hint for this window';
-    $('e-app').textContent = edit.app;
-    $('e-title').textContent = app || edit.title === edit.app ? '' : edit.title;
+    const w = wins.find(w => w.id === edit.id) ?? { id: edit.id, app: edit.app };
+    const title = app ? '' : cleanTitle(edit.title, edit.app);
+    $('e-target').replaceChildren(icon(w), el('span', 'app', edit.app), ...(title ? [el('span', 'title', title)] : []));
     const chars = [...edit.keys];
     $('slots').replaceChildren(...Array.from({ length: MAX_HINT }, (_, i) =>
       el('span', i < chars.length ? 'on' : i === chars.length ? 'next' : '', chars[i])));
     $('e-err').textContent = edit.error ?? '';
     const now = `Now ${kbdHtml(edit.current || '–')}${{ window: ' (window hint)', app: ' (app hint)' }[edit.kind] ?? ''}`;
-    $('e-help').innerHTML = `${now} · ${kbdHtml('Enter')} save · ${kbdHtml('Del')} reset to default · ${kbdHtml('Esc')} back`;
+    $('e-help').innerHTML = `${now} · ${kbdHtml('Enter')} save · ${kbdHtml('Del')} reset · ${kbdHtml('Esc')} back`;
+  }
+
+  function renderFoot(search, preview) {
+    $('foot').innerHTML =
+      preview && !search ? keys(['a–z', 'narrow'], ['↑↓', 'select'], ['⇧', 'release to open'])
+      : search ? keys(['↑↓', 'select'], ['Enter', 'open'], ['Del', 'close window'], ['\\', 'hint'], ['|', 'app hint'], ['Esc', 'close'])
+      : keys(['Shift', 'previews'], ['↑↓', 'select'], ['Del', 'close window'], ['\\', 'hint'], ['|', 'app hint'], ['Esc', 'close']);
   }
 
   // Where there's no global keyboard hook (Wayland), the overlay has focus and forwards
@@ -167,30 +222,49 @@
   addEventListener('keydown', forward(true));
   addEventListener('keyup', forward(false));
 
-  // Tell Rust where the preview boxes are (CSS px); boxes scrolled out of view get none.
-  let sentThumbs = '[]';
-  function sendThumbs() {
+  // Windows: report where the card (blur region) and preview boxes are, in CSS px.
+  // Rust answers with each preview's aspect ratio so the big one can match its window.
+  const aspects = new Map();
+  let sentLayout = '';
+  function sendLayout() {
+    if (domInput) return;
+    const card = $('card').hidden ? null : (r => [r.x, r.y, r.width, r.height])($('card').getBoundingClientRect());
     const list = $('list').getBoundingClientRect();
-    const rects = [...document.querySelectorAll('.thumb')].flatMap(t => {
+    const thumbs = [...document.querySelectorAll('.thumb')].flatMap(t => {
       const r = t.getBoundingClientRect();
-      return r.top >= list.top && r.bottom <= list.bottom ? [[+t.dataset.id, r.x, r.y, r.width, r.height]] : [];
+      return r.top >= list.top - 1 && r.bottom <= list.bottom + 1 ? [[+t.dataset.id, r.x, r.y, r.width, r.height]] : [];
     });
-    const json = JSON.stringify(rects);
-    if (json !== sentThumbs) { sentThumbs = json; invoke('thumbs', { rects }); }
+    const json = JSON.stringify([card, thumbs]);
+    if (json === sentLayout) return;
+    sentLayout = json;
+    invoke('layout', { card, thumbs }).then(res => {
+      let changed = false;
+      for (const [id, a] of res) if (aspects.get(id) !== a) { aspects.set(id, a); changed = true; }
+      if (changed) { sizeBig(); sendLayout(); }
+    });
   }
-  $('list').onscroll = sendThumbs;
+  function sizeBig() {
+    const t = document.querySelector('.row.big .thumb');
+    if (!t) return;
+    const a = aspects.get(+t.dataset.id) || 16 / 10;
+    t.style.height = `${Math.round(Math.min(330, Math.max(150, t.clientWidth / a)))}px`;
+  }
+  $('list').onscroll = sendLayout;
+  new ResizeObserver(sendLayout).observe($('card'));
 
   listen('view', ({ payload: { rows, typed, search, edit, dom_input, selected, preview } }) => {
     domInput = dom_input;
     preview = preview && !edit;
-    renderEdit(edit);
+    renderEdit(edit, rows);
     $('card').hidden = rows.length === 0 && !search;
     $('search').hidden = !search;
     $('card').classList.toggle('searching', !!search);
+    $('card').classList.toggle('previewing', preview);
     $('card').classList.toggle('typing', !search && typed.length > 0);
     $('query').textContent = search?.query ?? '';
+    renderFoot(search, preview);
 
-    $('list').replaceChildren(...rows.map((w, i) => {
+    $('list').replaceChildren(...rows.map(w => {
       const match = !search && w.key.startsWith(typed);
       const row = el('button', 'row');
       row.classList.toggle('dim', !search && !match);
@@ -198,18 +272,21 @@
       row.onclick = e => { e.stopPropagation(); invoke('activate', { id: w.id }); };
 
       const kbd = el('kbd', w.kind);
-      // Per char: already typed (faded) / the one to press next / still to come (muted).
+      // Per char: already typed (faded) / the one to press next (accent).
       const n = match ? typed.length : 0;
-      kbd.append(...[...w.key].map((c, i) => el('span', i < n ? 'done' : i === n ? 'next' : 'later', c)));
+      kbd.append(...[...w.key].map((c, i) => el('span', i < n ? 'done' : i === n ? 'next' : '', c)));
 
       // Hit indices are char positions in "app title" (or just "app" when title == app).
       const hits = new Set(w.hits);
-      const appLen = [...w.app].length;
-      const title = w.title === w.app ? '' : w.title;
-      row.append(kbd, highlight(el('span', 'app'), w.app, hits, 0), highlight(el('span', 'title'), title, hits, appLen + 1));
+      const text = el('span', 'text');
+      text.append(highlight(el('span', 'app'), w.app, hits, 0));
+      const title = cleanTitle(w.title, w.app);
+      if (title) text.append(highlight(el('span', 'title'), title, hits, [...w.app].length + 1));
+      row.append(kbd, icon(w), text);
       if (preview) {
-        const thumb = el('div', 'thumb', 'No preview');
+        const thumb = el('div', 'thumb');
         thumb.dataset.id = w.id;
+        thumb.append(icon(w));
         row.prepend(thumb);
         row.classList.toggle('big', !search && typed.length > 0 && w.id === selected);
       }
@@ -217,12 +294,15 @@
     }));
 
     if (search && rows.length === 0) $('list').replaceChildren(el('div', 'empty', 'No matching windows'));
+    sizeBig();
     $('list').querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
-    sendThumbs();
+    sendLayout();
   }).then(() => invoke('ready'));
 
-  // Clicking the transparent area around the card dismisses.
+  // Clicking around the card dismisses (Linux; on Windows the window is the card, and the
+  // mouse hook closes it on clicks elsewhere).
   document.body.onclick = () => invoke('hide');
+  $('card').onclick = e => e.stopPropagation();
 </script>
 </body>
 </html>

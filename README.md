@@ -14,7 +14,7 @@ Inspired by [Adam Basis](https://www.youtube.com/@AdamBasis)'s alt-tab videos.
 | Backspace | undo a typed letter / query character |
 | ↑ ↓ or **Alt+K / Alt+J** | move the selection in either mode |
 | Enter | focus the selected window in either mode |
-| Delete | close the selected window (search); in the hint dialog: reset to default |
+| Delete | close the selected window; in the hint dialog: reset to default |
 | `\` | set a hint for this one window (lives as long as the window) |
 | `\|` | set a hint for every window of this app (saved to disk) |
 | Esc / CapsLock | close or go back |
@@ -105,12 +105,23 @@ Window list, focus and close go through `niri msg --json windows` and `niri msg 
 
 ## Layout / porting
 
+### Windows look
+
+- The overlay window is sized to the card (`layout` command) and gets an acrylic blur
+  plus Windows 11 rounded corners.
+- Apps show their real icon (`http://icon.localhost/<window id>`, from `WM_GETICON`)
+  and a friendly name from the exe's version info ("Phone Link", not "PhoneExperienceHost").
+- A trailing " - App" in titles is hidden, since the app name is already shown.
+- Clicking outside the card closes it (low-level mouse hook).
+- Debug builds take `--keys=^ab` to press keys after opening (`^` holds Shift), for screenshots.
+
 ### Windows previews
 
 Holding Shift (either one; Right Shift still means search while Right Alt is held)
 shows previews. They are live DWM thumbnails (`DwmRegisterThumbnail`) that DWM
 draws over the placeholder boxes the webview lays out. The webview sends their
-positions through the `thumbs` command. Minimized windows show "No preview".
+positions through the `layout` command. Each preview is cropped to fill its box, and the
+large one takes its window's shape. Minimized windows show their icon.
 Shift is never swallowed by the hook, so the app behind just sees a bare Shift.
 
 ```

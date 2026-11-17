@@ -30,11 +30,15 @@ fn ready() {
     switcher::refresh();
 }
 
-/// Where the webview laid out Shift previews: (window id, x, y, w, h) in CSS px.
+/// Where the webview put the card and the Shift preview boxes, in CSS px.
 #[cfg(windows)]
 #[tauri::command]
-fn thumbs(window: tauri::WebviewWindow, rects: Vec<(keys::WinId, f64, f64, f64, f64)>) {
-    platform::thumbs(&window, &rects);
+fn layout(
+    window: tauri::WebviewWindow,
+    card: Option<(f64, f64, f64, f64)>,
+    thumbs: Vec<(keys::WinId, f64, f64, f64, f64)>,
+) -> Vec<(keys::WinId, f64)> {
+    platform::layout(&window, card, &thumbs)
 }
 
 /// `keytab --toggle` / `keytab --search`, for compositor keybinds.
@@ -43,6 +47,15 @@ fn handle_args<S: AsRef<str>>(args: &[S]) {
         switcher::search();
     } else if args.iter().any(|a| a.as_ref() == "--toggle") {
         switcher::toggle();
+    }
+    // Debug builds: `--keys=^ab` presses keys after opening (^ = hold Shift), for
+    // screenshots, since the Windows hook ignores synthetic input.
+    #[cfg(debug_assertions)]
+    for a in args.iter().filter_map(|a| a.as_ref().strip_prefix("--keys=")) {
+        for c in a.chars() {
+            let key = if c == '^' { switcher::Key::Preview } else { switcher::Key::from_dom(&c.to_string()) };
+            switcher::on_key(key, true);
+        }
     }
 }
 
@@ -70,9 +83,20 @@ fn main() {
     }));
 
     #[cfg(windows)]
-    let builder = builder.invoke_handler(tauri::generate_handler![activate, hide, key, ready, thumbs]);
+    let builder = builder.invoke_handler(tauri::generate_handler![activate, hide, key, ready, layout]);
     #[cfg(not(windows))]
     let builder = builder.invoke_handler(tauri::generate_handler![activate, hide, key, ready]);
+    // App icons for the webview: http://icon.localhost/<window id>.
+    #[cfg(windows)]
+    let builder = builder.register_uri_scheme_protocol("icon", |_ctx, req| {
+        let png = req.uri().path().trim_start_matches('/').parse().ok().and_then(platform::icon_png);
+        let res = tauri::http::Response::builder();
+        match png {
+            Some(png) => res.header("Content-Type", "image/png").body(std::borrow::Cow::Owned(png)),
+            None => res.status(404).body(std::borrow::Cow::Borrowed(&[][..])),
+        }
+        .unwrap()
+    });
 
     builder
         .setup(move |app| {
@@ -85,7 +109,6 @@ fn main() {
             let overlay = tauri::window::WindowBuilder::from_config(app, &app.config().app.windows[0])?.build()?;
             #[cfg(windows)]
             let overlay = tauri::WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?.build()?;
-            #[cfg(target_os = "linux")]
             platform::init(&overlay)?;
             switcher::init(app.handle().clone(), overlay);
             #[cfg(windows)]
