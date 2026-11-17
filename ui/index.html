@@ -53,12 +53,14 @@
   #card[hidden] { display: none; }
 
   /* Search: an inset field with a steady caret (no animations by design). */
+  /* The field shares the rows' grid: the glass sits in the icon column and the query starts
+     where app names do (row inset 16px + chip 3.4×13px + gap, minus this 8px margin). */
   #search {
-    display: flex; align-items: center; gap: 10px; margin: 8px 8px 0; padding: 10px 12px;
+    display: flex; align-items: center; gap: 10px; margin: 8px 8px 0; padding: 10px 12px 10px calc(8px + 44.2px + 10px);
     border-radius: 6px; background: var(--field); font-size: 15px;
   }
   #search[hidden] { display: none; }
-  #search svg { flex: none; color: var(--muted); }
+  #search svg { flex: none; margin: 0 2px; color: var(--muted); }
   #query { white-space: pre; }
   #caret { position: relative; flex: none; width: 2px; height: 1.15em; margin-left: -9px; background: var(--accent); }
   #query:empty + #caret { margin-left: -10px; }
@@ -84,7 +86,7 @@
   }
   /* Hint progress, on every matching chip: typed letters recede, the keys still to press
      turn accent. Blue fill is reserved for the selected row. */
-  kbd .done { opacity: 0.35; }
+  kbd .done { opacity: 0.5; }
   .typing kbd .rest { color: var(--accent); }
   .row.sel kbd { background: var(--accent); color: var(--on-accent); }
   .row.sel kbd .rest { color: inherit; }
@@ -110,6 +112,8 @@
      draws it with DWM over this box; the box itself only shows when there's nothing to draw. */
   #pcap { display: flex; align-items: center; gap: 8px; margin: 2px 16px 8px; color: var(--muted); font-size: 12.5px; }
   #pcap[hidden] { display: none; }
+  /* No chip while searching: start at the icon column, under the search glass. */
+  .searching #pcap { margin-left: calc(16px + 44.2px + 10px); }
   #pcap kbd { width: auto; font-size: 11px; padding: 1px 5px; }
   #preview {
     margin: 0 6px 6px; border-radius: 6px; background: var(--well);
@@ -119,7 +123,7 @@
   #preview .icon, #preview .mono { width: 40px; height: 40px; font-size: 20px; }
 
   /* Key legend: the same component in every mode. */
-  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
   .keys kbd { width: auto; min-width: 1.7em; padding: 1px 5px; margin-right: 5px; font-size: 12px; color: var(--text); }
   .keys .or { margin: 0 5px 0 0; }
   #foot { padding: 8px 16px 9px; border-top: 1px solid var(--line); }
@@ -133,6 +137,7 @@
   #edit .target .app { max-width: none; }
   #change { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 18px; }
   #change > kbd { width: auto; display: inline-flex; align-items: center; justify-content: center; height: 48px; padding: 0 12px; font-size: 22px; color: var(--muted); }
+  #change > kbd.app, #change > kbd.window { color: var(--custom); }
   #slots { display: flex; gap: 6px; }
   /* Slots are big hint chips: filled when typed, outlined with a caret where you type next. */
   #slots span {
@@ -229,12 +234,16 @@
   function renderFoot(search, preview, edit, rows, typed, pinned) {
     const next = [...new Set(rows.filter(w => w.key.startsWith(typed) && w.key.length > typed.length)
       .map(w => w.key[typed.length].toUpperCase()))];
+    // Shift release opens only a hint that's fully typed (switcher::unique_hint).
+    const pin = ['Ctrl P', pinned ? 'unpin previews' : 'pin previews'];
+    const peek = pinned ? pin : ['L⇧', 'preview'];
     $('foot').innerHTML =
       edit ? keys(['↵', 'save'], ['Del', 'reset to automatic'], ['Esc', 'back'])
-      : search ? keys(['↑↓', 'select'], ['↵', 'open'], ['Del', 'close'], ['\\', 'set hint'], ['R⇧', 'hints'], ['Esc', 'dismiss'])
-      : typed ? `<span>${next.map(c => `<kbd>${c}</kbd>`).join('<span class="or">or</span>')}to finish</span>` + keys(...(preview ? [['⇧', 'release to open']] : []), ['⌫', 'back'], ['Esc', 'dismiss'])
-      : preview ? keys(['↑↓', 'select'], ['⇧', 'release to open'], ['a–z 0–9', 'narrow'], ['Ctrl P', pinned ? 'unpin previews' : 'pin previews'], ['Esc', 'dismiss'])
-      : keys(['a–z 0–9', 'type hint'], ['↑↓ ↵', 'select'], ['L⇧', 'preview'], ['R⇧ /', 'search'], ['Del', 'close'], ['\\', 'set hint'], ['Esc', 'dismiss']);
+      : search ? keys(['↑↓', 'select'], ['↵', 'open'], peek, ['Del', 'close'], ['\\', 'set hint'], ['R⇧', 'hints'], ['Esc', 'dismiss'])
+      : typed ? (next.length ? `<span>${next.map(c => `<kbd>${c}</kbd>`).join('<span class="or">or</span>')}to finish</span>` : keys(['⇧', 'release to open']))
+        + keys(['↑↓', 'select'], ['↵', 'open'], ['⌫', 'back'], ['Esc', 'dismiss'])
+      : preview ? keys(['↑↓', 'select'], ['↵', 'open'], ['a–z 0–9', 'hint'], pin, ['Esc', 'dismiss'])
+      : keys(['a–z 0–9', 'hint'], ['↑↓', 'select'], ['↵', 'open'], peek, ['R⇧ /', 'search'], ['Del', 'close'], ['\\', 'set hint'], ['Esc', 'dismiss']);
   }
 
   // Where there's no global keyboard hook (Wayland), the overlay has focus and forwards
@@ -314,7 +323,8 @@
     if (big) {
       $('preview').dataset.id = big.id;
       $('preview').replaceChildren(icon(big));
-      $('pcap').replaceChildren(el('kbd', '', big.key), el('span', '', `Preview · ${big.app}`));
+      // Hints are hidden while searching, so the caption drops its chip there too.
+      $('pcap').replaceChildren(...(search ? [] : [el('kbd', big.kind, big.key)]), el('span', '', `Preview · ${big.app}`));
     }
 
     if (search && rows.length === 0) $('list').replaceChildren(el('div', 'empty', 'No matching windows'));

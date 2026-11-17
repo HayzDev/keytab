@@ -292,12 +292,18 @@ fn open(s: &mut State) {
     }
 }
 
+/// An empty query lists every window in recency order, so start on the previous one like
+/// hint mode does (selected_hint); a real query starts on its best match.
+fn first_sel(query: &str, hits: usize) -> usize {
+    usize::from(query.is_empty() && hits > 1)
+}
+
 fn open_search(s: &mut State) {
     if !s.open {
         open(s);
     }
     let hits = rank(&s.wins, "");
-    s.search = Some(Search { query: String::new(), sel: 0, hits });
+    s.search = Some(Search { query: String::new(), sel: first_sel("", hits.len()), hits });
     emit(s);
 }
 
@@ -532,7 +538,7 @@ fn on_search_key(s: &mut State, key: Key) -> bool {
             s.wins.remove(i);
             q.query.clear();
             q.hits = rank(&s.wins, "");
-            q.sel = 0;
+            q.sel = first_sel("", q.hits.len());
         }
         k if k.hint_scope().is_some() => {
             if let Some(&(i, _)) = q.hits.get(q.sel) {
@@ -544,7 +550,7 @@ fn on_search_key(s: &mut State, key: Key) -> bool {
         Key::Back => {
             q.query.pop();
             q.hits = rank(&s.wins, &q.query);
-            q.sel = 0;
+            q.sel = first_sel(&q.query, q.hits.len());
         }
         Key::Char(c) => {
             q.query.push(c);
