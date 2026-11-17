@@ -118,10 +118,10 @@ Window list, focus and close go through `niri msg --json windows` and `niri msg 
 ### Windows previews
 
 Holding Shift (either one; Right Shift still means search while Right Alt is held)
-shows previews. They are live DWM thumbnails (`DwmRegisterThumbnail`) that DWM
-draws over the placeholder boxes the webview lays out. The webview sends their
-positions through the `layout` command. Each preview is cropped to fill its box, and the
-large one takes its window's shape. Minimized windows show their icon.
+shows one large live preview of the selected window under the list; arrow keys change
+it. It's a DWM thumbnail (`DwmRegisterThumbnail`) drawn over a box the webview lays out
+and reports through the `layout` command, sized to the window's shape. A minimized
+window shows its icon instead.
 Shift is never swallowed by the hook, so the app behind just sees a bare Shift.
 
 ```
