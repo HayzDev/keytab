@@ -5,6 +5,8 @@ edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1"
+pkg-config = "0.3"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -24,6 +26,10 @@ windows = { version = "0.61", features = [
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+tauri = { version = "2", features = ["unstable"] }
+gtk = "0.18"
+gtk-layer-shell = { version = "0.8.2", features = ["v0_6"] }
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
 tauri-plugin-single-instance = "2"
 
 [profile.release]

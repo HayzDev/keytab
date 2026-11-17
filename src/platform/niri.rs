@@ -2,15 +2,72 @@
 //!
 //! Wayland has no global keyboard hook, so input works differently from Windows:
 //! a niri keybind runs `keytab --toggle` (or `--search`), the single-instance plugin
-//! forwards that to the running keytab, the overlay takes keyboard focus, and the
-//! webview forwards key events to `switcher::on_key` (GLOBAL_INPUT = false).
+//! forwards that to the running keytab; native GTK widgets render the shared state
+//! and send keyboard events to `switcher::on_key` (GLOBAL_INPUT = false).
 use crate::keys::{capitalize, Win, WinId};
 use serde::Deserialize;
 use std::cmp::Reverse;
 use std::process::Command;
-use tauri::WebviewWindow;
+use super::Overlay;
+use gtk_layer_shell::{KeyboardMode, Layer, LayerShell};
+use gtk::prelude::*;
 
 pub const GLOBAL_INPUT: bool = false;
+
+extern "C" {
+    fn keytab_material(window: *mut gtk::ffi::GtkWindow, x: i32, y: i32, width: i32, height: i32);
+    fn keytab_commit(window: *mut gtk::ffi::GtkWindow);
+}
+
+/// Reuse the plugin's D-Bus endpoint before initializing GTK/WebKit in the client.
+pub fn forward_args() -> bool {
+    let Ok(bus) = zbus::blocking::Connection::session() else { return false };
+    bus.call_method(
+        Some("dev.keytab.app.SingleInstance"),
+        "/dev/keytab/app/SingleInstance",
+        Some("org.SingleInstance.DBus"),
+        "ExecuteCallback",
+        &(std::env::args().collect::<Vec<_>>(), String::new()),
+    ).is_ok()
+}
+
+/// Configure the hidden GTK window before its first map.
+pub fn init(overlay: &Overlay) -> tauri::Result<()> {
+    let window = gtk::Window::new(gtk::WindowType::Toplevel);
+    window.set_decorated(false);
+    window.set_default_size(640, 720);
+    window.set_focus_on_map(false);
+    if let Some(visual) = WidgetExt::screen(&window).and_then(|s| s.rgba_visual()) {
+        window.set_visual(Some(&visual));
+    }
+    window.set_app_paintable(false);
+    let css = gtk::CssProvider::new();
+    css.load_from_data(b"window { background-color: transparent; }").expect("overlay CSS");
+    window.style_context().add_provider(&css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    window.init_layer_shell();
+    window.set_namespace("keytab");
+    window.set_layer(Layer::Overlay);
+    window.set_keyboard_mode(KeyboardMode::None);
+    window.set_accept_focus(true);
+    window.input_shape_combine_region(Some(&gtk::cairo::Region::create()));
+    super::gtk_ui::init(&window);
+    assert!(window.is_layer_window(), "keytab: layer-shell initialization failed");
+    // Keep the renderer and Wayland surface warm; the empty panel is transparent.
+    window.show_all();
+    material(&window, 0, 0, 0, 0);
+    overlay.gtk_window()?.connect_destroy(move |_| window.close());
+    Ok(())
+}
+
+fn material_rect(x: i32, y: i32, width: i32, height: i32) -> [i32; 4] {
+    let (x, y) = (x.clamp(0, 640), y.clamp(0, 720));
+    [x, y, width.clamp(0, 640 - x), height.clamp(0, 720 - y)]
+}
+
+pub fn material(window: &gtk::Window, x: i32, y: i32, width: i32, height: i32) {
+    let [x, y, width, height] = material_rect(x, y, width, height);
+    unsafe { keytab_material(window.as_ptr() as _, x, y, width, height) };
+}
 
 #[derive(Deserialize)]
 struct NiriWindow {
@@ -73,22 +130,51 @@ pub fn close(id: WinId) {
     niri(&["action", "close-window", "--id", &id.to_string()]);
 }
 
-/// ponytail: niri never reuses window ids, so a stale per-window hint is harmless (it
-/// just never matches again). Prune against list() if the map ever grows large.
+/// shortcut: stale hints stay in memory; prune against list() if the map grows large.
 pub fn alive(_id: WinId) -> bool {
     true
 }
 
-/// The overlay needs real keyboard focus here (no global hook). Needs a niri window
-/// rule to float it; see README.
-pub fn show(overlay: &WebviewWindow) {
-    let _ = overlay.show();
-    let _ = overlay.set_focus();
+/// Layer-shell grants keyboard focus without creating a managed app window.
+pub fn show(_overlay: &Overlay) {
+    let window = super::gtk_ui::window();
+    window.input_shape_combine_region(None);
+    window.set_keyboard_mode(KeyboardMode::Exclusive);
+    unsafe { keytab_commit(window.as_ptr() as _) };
 }
 
-pub fn hide(overlay: &WebviewWindow) {
-    let _ = overlay.hide();
+pub fn hide(_overlay: &Overlay) {
+    let window = super::gtk_ui::window();
+    window.set_keyboard_mode(KeyboardMode::None);
+    window.input_shape_combine_region(Some(&gtk::cairo::Region::create()));
+    material(&window, 0, 0, 0, 0);
+    unsafe { keytab_commit(window.as_ptr() as _) };
 }
 
-/// Nothing to install: keys come from the webview via the `key` command.
+/// Native GTK key handlers are installed by `init`.
 pub fn start_input() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clips_material_to_surface() {
+        assert_eq!(material_rect(24, 250, 592, 220), [24, 250, 592, 220]);
+        assert_eq!(material_rect(-10, -10, i32::MAX, i32::MAX), [0, 0, 640, 720]);
+        assert_eq!(material_rect(700, 900, 100, 100), [640, 720, 0, 0]);
+        assert_eq!(material_rect(0, 0, -1, -1), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn parses_niri_focus_timestamps() {
+        let w: NiriWindow = serde_json::from_str(r#"{
+            "id":29,"title":"Keytab","app_id":"dev.keytab.app","pid":123,
+            "is_focused":true,"focus_timestamp":{"secs":10266,"nanos":232048883}
+        }"#).unwrap();
+        assert!(w.is_focused);
+        assert_eq!(timestamp(&w.focus_timestamp), (10266, 232048883));
+        assert_eq!(timestamp(&serde_json::json!(42)), (42, 0));
+        assert_eq!(timestamp(&serde_json::Value::Null), (0, 0));
+    }
+}

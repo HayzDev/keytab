@@ -5,8 +5,8 @@
 <title>keytab</title>
 <style>
   :root {
-    --card: rgba(22, 22, 26, 0.94);
-    --line: rgba(255, 255, 255, 0.07);
+    --card: rgba(11, 14, 20, 0.88);
+    --line: rgba(42, 53, 76, 0.95);
     --text: #ececf1;
     --muted: #8b8b96;
     --key-bg: rgba(255, 255, 255, 0.06);
@@ -16,7 +16,7 @@
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --card: rgba(250, 250, 252, 0.96);
+      --card: rgba(250, 250, 252, 0.98);
       --line: rgba(0, 0, 0, 0.07);
       --text: #17171c;
       --muted: #6b6b76;
@@ -35,13 +35,12 @@
   }
   #card {
     width: 100%; max-height: 100%; display: flex; flex-direction: column;
-    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   }
   #card[hidden] { display: none; }
   #search {
     display: flex; align-items: center; gap: 10px;
-    padding: 14px 16px; border-bottom: 1px solid var(--line);
+    padding: 14px 16px;
     font-size: 16px;
   }
   #search[hidden] { display: none; }
@@ -79,10 +78,11 @@
 
   #card { position: relative; }
   #card.editing { min-height: 240px; }
+  #card.editing > #list, #card.editing > #search { visibility: hidden; }
   #edit {
     position: absolute; inset: 0; z-index: 1; border-radius: inherit;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-    padding: 20px; background: var(--card); backdrop-filter: blur(6px); text-align: center;
+    padding: 20px; text-align: center;
   }
   #edit[hidden] { display: none; }
   #edit .label { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
@@ -161,10 +161,8 @@
   };
   addEventListener('keydown', forward(true));
   addEventListener('keyup', forward(false));
-  // Focused overlay: clicking another window should dismiss it.
-  addEventListener('blur', () => domInput && invoke('hide'));
 
-  listen('view', ({ payload: { rows, typed, search, edit, dom_input } }) => {
+  listen('view', ({ payload: { rows, typed, search, edit, dom_input, selected } }) => {
     domInput = dom_input;
     renderEdit(edit);
     $('card').hidden = rows.length === 0 && !search;
@@ -177,7 +175,7 @@
       const match = !search && w.key.startsWith(typed);
       const row = el('button', 'row');
       row.classList.toggle('dim', !search && !match);
-      row.classList.toggle('sel', !!search && i === search.sel);
+      row.classList.toggle('sel', w.id === selected);
       row.onclick = e => { e.stopPropagation(); invoke('activate', { id: w.id }); };
 
       const kbd = el('kbd', w.kind);
@@ -195,7 +193,7 @@
 
     if (search && rows.length === 0) $('list').replaceChildren(el('div', 'empty', 'No matching windows'));
     $('list').querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
-  });
+  }).then(() => invoke('ready'));
 
   // Clicking the transparent area around the card dismisses.
   document.body.onclick = () => invoke('hide');

@@ -9,6 +9,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "keytab",
         "width": 640,
         "height": 720,

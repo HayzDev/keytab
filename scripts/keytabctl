@@ -1,0 +1,13 @@
+#!/bin/sh
+action=${1:---toggle}
+case "$action" in
+    --toggle|--search|--quit) ;;
+    *) echo "usage: keytabctl [--toggle|--search|--quit]" >&2; exit 2 ;;
+esac
+
+if gdbus call --session --dest dev.keytab.app.SingleInstance \
+    --object-path /dev/keytab/app/SingleInstance \
+    --method org.SingleInstance.DBus.ExecuteCallback "['keytab', '$action']" '' >/dev/null 2>&1; then
+    exit 0
+fi
+exec "$(dirname "$0")/keytab" "$action"

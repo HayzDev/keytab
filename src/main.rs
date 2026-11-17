@@ -9,6 +9,7 @@ mod keys;
 mod platform;
 mod switcher;
 
+#[cfg(windows)]
 use tauri::Manager;
 
 #[tauri::command]
@@ -27,6 +28,11 @@ fn key(key: String, down: bool) {
     switcher::on_key(switcher::Key::from_dom(&key), down);
 }
 
+#[tauri::command]
+fn ready() {
+    switcher::refresh();
+}
+
 /// `keytab --toggle` / `keytab --search`, for compositor keybinds.
 fn handle_args<S: AsRef<str>>(args: &[S]) {
     if args.iter().any(|a| a.as_ref() == "--search") {
@@ -37,6 +43,13 @@ fn handle_args<S: AsRef<str>>(args: &[S]) {
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    if platform::forward_args() {
+        return;
+    }
+    // A quit request must not start a hidden instance when none is running.
+    #[cfg(target_os = "linux")]
+    let quit = std::env::args().any(|a| a == "--quit");
     let builder = tauri::Builder::default();
 
     // A second `keytab --toggle` hands its args to the running instance and exits.
@@ -44,14 +57,28 @@ fn main() {
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
         if args.iter().any(|a| a == "--quit") {
             app.exit(0);
+            return;
         }
-        handle_args(&args);
+        // Queue early invocations until setup has initialized the overlay.
+        if let Err(e) = app.run_on_main_thread(move || handle_args(&args)) {
+            eprintln!("keytab: couldn't handle launch arguments: {e}");
+        }
     }));
 
     builder
-        .invoke_handler(tauri::generate_handler![activate, hide, key])
-        .setup(|app| {
-            let overlay = app.get_webview_window("main").expect("main window");
+        .invoke_handler(tauri::generate_handler![activate, hide, key, ready])
+        .setup(move |app| {
+            #[cfg(target_os = "linux")]
+            if quit {
+                app.handle().exit(0);
+                return Ok(());
+            }
+            #[cfg(target_os = "linux")]
+            let overlay = tauri::window::WindowBuilder::from_config(app, &app.config().app.windows[0])?.build()?;
+            #[cfg(windows)]
+            let overlay = tauri::WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?.build()?;
+            #[cfg(target_os = "linux")]
+            platform::init(&overlay)?;
             switcher::init(app.handle().clone(), overlay);
             #[cfg(windows)]
             tray(app)?;

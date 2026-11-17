@@ -1,0 +1,13 @@
+spawn-at-startup "~/.local/bin/keytab"
+
+layer-rule {
+    match namespace="^keytab$"
+    background-effect {
+        xray false
+    }
+}
+
+binds {
+    Mod+Tab repeat=false hotkey-overlay-title="Keytab" { spawn "~/.local/bin/keytabctl" "--toggle"; }
+    Mod+Shift+Tab repeat=false hotkey-overlay-title="Keytab Search" { spawn "~/.local/bin/keytabctl" "--search"; }
+}

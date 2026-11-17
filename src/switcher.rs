@@ -9,7 +9,9 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use tauri::{AppHandle, Emitter, WebviewWindow};
+use tauri::AppHandle;
+#[cfg(windows)]
+use tauri::Emitter;
 
 const MAX_HINT: usize = 4;
 
@@ -30,12 +32,16 @@ pub enum Key {
     Delete,
     /// Left Alt: held + j/k = down/up.
     Alt,
+    /// Hold Shift to inspect previews without immediately following a hint.
+    Preview,
     /// `\`: hint for this window.
     HintWindow,
     /// `|`: saved hint for every window of the app.
     HintApp,
     /// Lowercase letter/digit, or ' ', '-', '.'.
     Char(char),
+    /// A shifted number-row symbol, used as a digit only while previewing hints.
+    ShiftDigit(char),
     Other,
 }
 
@@ -50,11 +56,15 @@ impl Key {
             "ArrowDown" => Key::Down,
             "Delete" => Key::Delete,
             "Alt" => Key::Alt,
+            "Shift" => Key::Preview,
             "\\" => Key::HintWindow,
             "|" => Key::HintApp,
             _ => {
                 let mut cs = key.chars();
                 match (cs.next(), cs.next()) {
+                    (Some(c), None) if ")!@#$%^&*(".contains(c) => {
+                        Key::ShiftDigit((b'0' + ")!@#$%^&*(".find(c).unwrap() as u8) as char)
+                    }
                     (Some(c), None) if c.is_ascii_alphanumeric() || " -.".contains(c) => {
                         Key::Char(c.to_ascii_lowercase())
                     }
@@ -82,22 +92,22 @@ struct Search {
 
 #[derive(Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum Scope {
+pub(crate) enum Scope {
     Window,
     App,
 }
 
 /// The hint dialog, for one window (`\`) or every window of its app (`|`).
 #[derive(Clone, Serialize)]
-struct Edit {
-    scope: Scope,
-    id: WinId,
-    app: String,
-    title: String,
-    current: String,
-    kind: Kind,
-    keys: String,
-    error: Option<String>,
+pub(crate) struct Edit {
+    pub(crate) scope: Scope,
+    pub(crate) id: WinId,
+    pub(crate) app: String,
+    pub(crate) title: String,
+    pub(crate) current: String,
+    pub(crate) kind: Kind,
+    pub(crate) keys: String,
+    pub(crate) error: Option<String>,
 }
 
 struct State {
@@ -105,7 +115,9 @@ struct State {
     activate_held: bool,
     alt_held: bool,
     alt_swallowed: bool,
+    preview_held: bool,
     typed: String,
+    selected: Option<WinId>,
     wins: Vec<Win>,
     search: Option<Search>,
     edit: Option<Edit>,
@@ -120,7 +132,9 @@ static STATE: Mutex<State> = Mutex::new(State {
     activate_held: false,
     alt_held: false,
     alt_swallowed: false,
+    preview_held: false,
     typed: String::new(),
+    selected: None,
     wins: Vec::new(),
     search: None,
     edit: None,
@@ -128,9 +142,9 @@ static STATE: Mutex<State> = Mutex::new(State {
     app_hints: BTreeMap::new(),
 });
 static APP: OnceLock<AppHandle> = OnceLock::new();
-static OVERLAY: OnceLock<WebviewWindow> = OnceLock::new();
+static OVERLAY: OnceLock<platform::Overlay> = OnceLock::new();
 
-pub fn init(app: AppHandle, overlay: WebviewWindow) {
+pub fn init(app: AppHandle, overlay: platform::Overlay) {
     STATE.lock().unwrap().app_hints = load_app_hints();
     let _ = APP.set(app);
     let _ = OVERLAY.set(overlay);
@@ -169,39 +183,50 @@ fn save_app_hints(hints: &BTreeMap<String, String>) {
 // ---- view ------------------------------------------------------------------------
 
 #[derive(Clone, Serialize)]
-struct Row<'a> {
+pub(crate) struct Row<'a> {
     #[serde(flatten)]
-    win: &'a Win,
-    hits: &'a [usize],
+    pub(crate) win: &'a Win,
+    pub(crate) hits: &'a [usize],
 }
 
 #[derive(Clone, Serialize)]
-struct SearchView<'a> {
-    query: &'a str,
-    sel: usize,
+pub(crate) struct SearchView<'a> {
+    pub(crate) query: &'a str,
+    pub(crate) sel: usize,
 }
 
 #[derive(Clone, Serialize)]
-struct View<'a> {
-    rows: Vec<Row<'a>>,
-    typed: &'a str,
-    search: Option<SearchView<'a>>,
-    edit: Option<&'a Edit>,
+pub(crate) struct View<'a> {
+    pub(crate) rows: Vec<Row<'a>>,
+    pub(crate) typed: &'a str,
+    pub(crate) search: Option<SearchView<'a>>,
+    pub(crate) edit: Option<&'a Edit>,
     /// True when the overlay has keyboard focus and the webview must forward keys.
-    dom_input: bool,
+    pub(crate) dom_input: bool,
+    pub(crate) preview: bool,
+    pub(crate) selected: Option<WinId>,
 }
 
 fn emit(s: &State) {
-    let Some(app) = APP.get() else { return };
+    let Some(_app) = APP.get() else { return };
     let (rows, search) = match &s.search {
         Some(q) => (
             q.hits.iter().map(|(i, h)| Row { win: &s.wins[*i], hits: h }).collect(),
             Some(SearchView { query: &q.query, sel: q.sel }),
         ),
-        None => (s.wins.iter().map(|w| Row { win: w, hits: &[] }).collect(), None),
+        None => (s.wins.iter().filter(|w| !s.preview_held || w.key.starts_with(&s.typed)).map(|w| Row { win: w, hits: &[] }).collect(), None),
     };
-    let view = View { rows, typed: &s.typed, search, edit: s.edit.as_ref(), dom_input: !platform::GLOBAL_INPUT };
-    let _ = app.emit("view", view);
+    let selected = s.search.as_ref().map_or_else(|| selected_hint(s), |q| q.hits.get(q.sel).map(|(i, _)| s.wins[*i].id));
+    let view = View { rows, typed: &s.typed, search, edit: s.edit.as_ref(), dom_input: !platform::GLOBAL_INPUT, preview: s.preview_held, selected };
+    #[cfg(windows)]
+    let _ = _app.emit("view", view);
+    #[cfg(target_os = "linux")]
+    platform::render(&view);
+}
+
+/// Replay state once the webview has installed its listener (including cold starts).
+pub fn refresh() {
+    emit(&STATE.lock().unwrap());
 }
 
 // ---- search ----------------------------------------------------------------------
@@ -240,6 +265,7 @@ fn open(s: &mut State) {
     s.wins = platform::list();
     keys::assign(&mut s.wins, &s.custom, &s.app_hints);
     s.typed.clear();
+    s.selected = None;
     s.search = None;
     s.edit = None;
     s.open = true;
@@ -260,7 +286,13 @@ fn open_search(s: &mut State) {
 
 fn close(s: &mut State) {
     s.open = false;
+    s.preview_held = false;
+    if !platform::GLOBAL_INPUT {
+        s.alt_held = false;
+        s.alt_swallowed = false;
+    }
     s.typed.clear();
+    s.selected = None;
     s.search = None;
     s.edit = None;
     s.wins.clear();
@@ -297,6 +329,18 @@ pub fn activate(id: WinId) {
 pub fn on_key(key: Key, down: bool) -> bool {
     let mut s = STATE.lock().unwrap();
     match key {
+        Key::Preview => {
+            if !s.open { return false; }
+            let was_held = std::mem::replace(&mut s.preview_held, down);
+            if was_held && !down && s.search.is_none() && s.edit.is_none() {
+                if let Some(id) = unique_hint(&s.wins, &s.typed) {
+                    switch_to(&mut s, id);
+                    return true;
+                }
+            }
+            if was_held != down { emit(&s); }
+            return true;
+        }
         Key::Activate => {
             if down && !s.activate_held {
                 if s.open { close(&mut s) } else { open(&mut s) }
@@ -328,6 +372,8 @@ pub fn on_key(key: Key, down: bool) -> bool {
         return false;
     }
     let key = match key {
+        Key::ShiftDigit(c) if s.preview_held && s.search.is_none() => Key::Char(c),
+        Key::ShiftDigit(_) => Key::Other,
         Key::Char('j') if s.alt_held => Key::Down,
         Key::Char('k') if s.alt_held => Key::Up,
         k => k,
@@ -340,9 +386,19 @@ pub fn on_key(key: Key, down: bool) -> bool {
     }
     match key {
         Key::Esc => close(&mut s),
-        Key::Up | Key::Down => {} // no selection in letter mode; swallow so Alt+J/K don't leak
+        Key::Up | Key::Down => {
+            let matches: Vec<_> = s.wins.iter().filter(|w| w.key.starts_with(&s.typed)).map(|w| w.id).collect();
+            let current = matches.iter().position(|id| Some(*id) == s.selected).unwrap_or(0);
+            let next = if key == Key::Up { current.saturating_sub(1) } else { (current + 1).min(matches.len().saturating_sub(1)) };
+            s.selected = matches.get(next).copied();
+            emit(&s);
+        }
+        Key::Enter => {
+            if let Some(id) = selected_hint(&s) { switch_to(&mut s, id); }
+        }
         Key::Back => {
             s.typed.pop();
+            s.selected = None;
             emit(&s);
         }
         Key::Char(c) if c.is_ascii_alphanumeric() => {
@@ -350,19 +406,20 @@ pub fn on_key(key: Key, down: bool) -> bool {
             let hits: Vec<_> = s.wins.iter().filter(|w| w.key.starts_with(&typed)).collect();
             match hits.as_slice() {
                 [] => {} // no window has this key: ignore the press
-                [w] if w.key == typed => {
+                [w] if w.key == typed && !s.preview_held => {
                     let id = w.id;
                     switch_to(&mut s, id);
                 }
                 _ => {
                     s.typed = typed;
+                    s.selected = None;
                     emit(&s);
                 }
             }
         }
-        // Top window still matching what's typed so far (first row when nothing typed).
+        // Edit the selected window among those still matching the hint prefix.
         k if k.hint_scope().is_some() => {
-            if let Some(i) = s.wins.iter().position(|w| w.key.starts_with(&s.typed)) {
+            if let Some(i) = selected_hint(&s).and_then(|id| s.wins.iter().position(|w| w.id == id)) {
                 start_edit(&mut s, i, k.hint_scope().unwrap());
                 emit(&s);
             }
@@ -370,6 +427,18 @@ pub fn on_key(key: Key, down: bool) -> bool {
         _ => return false, // let other keys through untouched
     }
     true
+}
+
+fn selected_hint(s: &State) -> Option<WinId> {
+    let mut matches = s.wins.iter().filter(|w| w.key.starts_with(&s.typed));
+    let first = matches.next()?;
+    s.selected.filter(|id| *id == first.id || matches.any(|w| w.id == *id)).or(Some(first.id))
+}
+
+fn unique_hint(wins: &[Win], typed: &str) -> Option<WinId> {
+    let mut hits = wins.iter().filter(|w| w.key.starts_with(typed));
+    let id = hits.next()?.id;
+    hits.next().is_none().then_some(id)
 }
 
 fn start_edit(s: &mut State, i: usize, scope: Scope) {
@@ -501,6 +570,7 @@ fn finish_edit(s: &mut State) {
 mod tests {
     use super::{rank, Key};
     use crate::keys::Win;
+    static STATE_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn fuzzy() {
@@ -525,7 +595,99 @@ mod tests {
         assert_eq!(Key::from_dom("CapsLock"), Key::Esc);
         assert_eq!(Key::from_dom("|"), Key::HintApp);
         assert_eq!(Key::from_dom("\\"), Key::HintWindow);
-        assert_eq!(Key::from_dom("Shift"), Key::Other);
+        assert_eq!(Key::from_dom("Shift"), Key::Preview);
         assert_eq!(Key::from_dom("é"), Key::Other);
+        for (symbol, digit) in ")!@#$%^&*(".chars().zip('0'..='9') {
+            assert_eq!(Key::from_dom(&symbol.to_string()), Key::ShiftDigit(digit));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn normal_arrows_select_only_matching_hints_and_clamp_at_the_ends() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(2, "Console".into(), "Shell".into()), Win::new(3, "Discord".into(), "Chat".into())];
+        for (win, hint) in s.wins.iter_mut().zip(["ca", "co", "d"]) { win.key = hint.into(); }
+        assert_eq!(super::selected_hint(&s), Some(1));
+        drop(s);
+        super::on_key(Key::Down, true);
+        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(2));
+        super::on_key(Key::Char('c'), true);
+        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(1));
+        super::on_key(Key::Down, true);
+        super::on_key(Key::Down, true);
+        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(2));
+        super::on_key(Key::Up, true);
+        super::on_key(Key::Up, true);
+        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(1));
+        super::on_key(Key::Back, true);
+        let mut s = super::STATE.lock().unwrap();
+        assert_eq!(s.typed, "");
+        assert_eq!(super::selected_hint(&s), Some(1));
+        s.wins.clear();
+        drop(s);
+        super::on_key(Key::Down, true);
+        let mut s = super::STATE.lock().unwrap();
+        assert_eq!(super::selected_hint(&s), None);
+        super::close(&mut s);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn shift_previews_defer_hints_and_backspace_restores_the_prefix() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(2, "Console".into(), "Terminal".into())];
+        s.wins[0].key = "c2".into();
+        s.wins[1].key = "co".into();
+        drop(s);
+        super::on_key(Key::Preview, true);
+        super::on_key(Key::Char('c'), true);
+        super::on_key(Key::Char('c'), false);
+        assert!(super::STATE.lock().unwrap().preview_held);
+        assert_eq!(super::unique_hint(&super::STATE.lock().unwrap().wins, "c"), None);
+        super::on_key(Key::from_dom("@"), true);
+        {
+            let s = super::STATE.lock().unwrap();
+            assert!(s.open);
+            assert_eq!(s.typed, "c2");
+            assert_eq!(super::unique_hint(&s.wins, &s.typed), Some(1));
+        }
+        super::on_key(Key::Back, true);
+        assert_eq!(super::STATE.lock().unwrap().typed, "c");
+        super::on_key(Key::Char('o'), true);
+        {
+            let s = super::STATE.lock().unwrap();
+            assert!(s.open && s.preview_held);
+            assert_eq!(s.typed, "co", "further letters must keep narrowing while Shift is held");
+        }
+        super::on_key(Key::Back, true);
+        super::on_key(Key::Preview, false);
+        let mut s = super::STATE.lock().unwrap();
+        assert!(s.open, "releasing Shift must not focus an ambiguous hint");
+        assert!(!s.preview_held);
+        super::open_search(&mut s);
+        drop(s);
+        super::on_key(Key::Preview, true);
+        super::on_key(Key::from_dom("@"), true);
+        let mut s = super::STATE.lock().unwrap();
+        assert_eq!(s.search.as_ref().unwrap().query, "", "shifted digits must not change search input");
+        super::close(&mut s);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn hiding_resets_modifiers_without_a_global_hook() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        s.alt_held = true;
+        s.alt_swallowed = true;
+        super::close(&mut s);
+        assert!(!s.alt_held && !s.alt_swallowed);
     }
 }
