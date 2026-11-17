@@ -10,7 +10,7 @@ Inspired by [Adam Basis](https://www.youtube.com/@AdamBasis)'s alt-tab videos.
 | **Right Alt** (Windows) / your niri bind | open / close |
 | hold Right Alt + **Right Shift** / `keytab --search` | open in fuzzy search |
 | letters | focus the window with that hint (two letters when first letters clash) |
-| hold **Shift** (Linux) | show window thumbnails; hint letters enlarge the top remaining preview; release to focus a unique match |
+| hold **Shift** | show window thumbnails; hint letters enlarge the top remaining preview; release to focus a unique match |
 | Backspace | undo a typed letter / query character |
 | ↑ ↓ or **Alt+K / Alt+J** | move the selection in either mode |
 | Enter | focus the selected window in either mode |
@@ -105,18 +105,13 @@ Window list, focus and close go through `niri msg --json windows` and `niri msg 
 
 ## Layout / porting
 
-### Future native Windows port
+### Windows previews
 
-The shared state machine in `src/switcher.rs` owns hint matching, fuzzy search,
-arrow selection, Backspace, and focus on Shift release. Keep these behaviors when
-replacing the Windows HTML renderer with a native UI. The view includes the
-selected window ID, typed hint prefix, and whether previews are being held.
-
-Windows still uses the existing Win32 window/input backend and Tauri webview;
-Linux's GTK renderer, blur integration, and PipeWire thumbnails are platform-specific.
-A native Windows port needs its own renderer and thumbnail implementation, plus
-Shift preview input without breaking the Right Alt + Right Shift search shortcut.
-Windows builds and runtime behavior have not been verified for this revision.
+Holding Shift (either one; Right Shift still means search while Right Alt is held)
+shows previews. They are live DWM thumbnails (`DwmRegisterThumbnail`) that DWM
+draws over the placeholder boxes the webview lays out. The webview sends their
+positions through the `thumbs` command. Minimized windows show "No preview".
+Shift is never swallowed by the hook, so the app behind just sees a bare Shift.
 
 ```
 src/

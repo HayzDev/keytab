@@ -328,6 +328,8 @@ pub fn activate(id: WinId) {
 /// Feed one key event. Returns true if keytab used it (a global hook should swallow it).
 pub fn on_key(key: Key, down: bool) -> bool {
     let mut s = STATE.lock().unwrap();
+    // Right Shift searches only as a chord with Activate; on its own it previews like Shift.
+    let key = if key == Key::Search && !(down && s.activate_held) { Key::Preview } else { key };
     match key {
         Key::Preview => {
             if !s.open { return false; }
@@ -602,7 +604,6 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn normal_arrows_select_only_matching_hints_and_clamp_at_the_ends() {
         let _guard = STATE_TEST.lock().unwrap();
@@ -635,7 +636,6 @@ mod tests {
         super::close(&mut s);
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn shift_previews_defer_hints_and_backspace_restores_the_prefix() {
         let _guard = STATE_TEST.lock().unwrap();
@@ -677,6 +677,21 @@ mod tests {
         super::on_key(Key::from_dom("@"), true);
         let mut s = super::STATE.lock().unwrap();
         assert_eq!(s.search.as_ref().unwrap().query, "", "shifted digits must not change search input");
+        super::close(&mut s);
+    }
+
+    #[test]
+    fn right_shift_searches_only_with_activate() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        drop(s);
+        super::on_key(Key::Search, true);
+        assert!(super::STATE.lock().unwrap().preview_held, "bare Right Shift previews");
+        super::on_key(Key::Search, false);
+        let mut s = super::STATE.lock().unwrap();
+        assert!(!s.preview_held && s.search.is_none());
         super::close(&mut s);
     }
 

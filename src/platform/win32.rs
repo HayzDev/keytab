@@ -7,8 +7,9 @@ use crate::keys::{capitalize, Win, WinId};
 use crate::switcher::{on_key, Key};
 use tauri::WebviewWindow;
 use windows::core::{BOOL, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, LRESULT, TRUE, WPARAM};
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+use std::sync::Mutex;
+use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM};
+use windows::Win32::Graphics::Dwm::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -130,9 +131,58 @@ pub fn show(overlay: &WebviewWindow) {
 }
 
 pub fn hide(overlay: &WebviewWindow) {
+    thumbs(overlay, &[]);
     let Ok(h) = overlay.hwnd() else { return };
     unsafe {
         let _ = ShowWindowAsync(HWND(h.0 as *mut _), SW_HIDE);
+    }
+}
+
+/// Live DWM thumbnails, one per (window, CSS-px box on the overlay). An empty list
+/// removes them all. Minimized windows have nothing to show, so they keep the placeholder.
+static THUMBS: Mutex<Vec<(WinId, isize)>> = Mutex::new(Vec::new());
+
+pub fn thumbs(overlay: &WebviewWindow, rects: &[(WinId, f64, f64, f64, f64)]) {
+    let mut thumbs = THUMBS.lock().unwrap();
+    thumbs.retain(|&(id, t)| {
+        let keep = rects.iter().any(|r| r.0 == id);
+        if !keep {
+            let _ = unsafe { DwmUnregisterThumbnail(t) };
+        }
+        keep
+    });
+    let Ok(dest) = overlay.hwnd() else { return };
+    let dest = HWND(dest.0 as *mut _);
+    let scale = overlay.scale_factor().unwrap_or(1.0);
+    for &(id, x, y, w, h) in rects {
+        if unsafe { IsIconic(hwnd(id)).as_bool() } {
+            continue;
+        }
+        let t = match thumbs.iter().find(|t| t.0 == id) {
+            Some(t) => t.1,
+            None => match unsafe { DwmRegisterThumbnail(dest, hwnd(id)) } {
+                Ok(t) => {
+                    thumbs.push((id, t));
+                    t
+                }
+                Err(_) => continue,
+            },
+        };
+        let Ok(src) = (unsafe { DwmQueryThumbnailSourceSize(t) }) else { continue };
+        if src.cx <= 0 || src.cy <= 0 {
+            continue;
+        }
+        let (x, y, w, h) = (x * scale, y * scale, w * scale, h * scale);
+        let fit = (w / src.cx as f64).min(h / src.cy as f64);
+        let (tw, th) = (src.cx as f64 * fit, src.cy as f64 * fit);
+        let (left, top) = (x + (w - tw) / 2.0, y + (h - th) / 2.0);
+        let props = DWM_THUMBNAIL_PROPERTIES {
+            dwFlags: DWM_TNP_RECTDESTINATION | DWM_TNP_VISIBLE,
+            rcDestination: RECT { left: left as i32, top: top as i32, right: (left + tw) as i32, bottom: (top + th) as i32 },
+            fVisible: true.into(),
+            ..Default::default()
+        };
+        let _ = unsafe { DwmUpdateThumbnailProperties(t, &props) };
     }
 }
 
@@ -143,6 +193,7 @@ fn translate(vk: u32) -> Key {
     match VIRTUAL_KEY(vk as u16) {
         VK_RMENU => Key::Activate,
         VK_RSHIFT => Key::Search,
+        VK_LSHIFT => Key::Preview,
         VK_ESCAPE | VK_CAPITAL => Key::Esc,
         VK_BACK => Key::Back,
         VK_RETURN => Key::Enter,
@@ -177,8 +228,13 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         let kb = &*(lp.0 as *const KBDLLHOOKSTRUCT);
         let msg = wp.0 as u32;
         let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
-        if kb.flags.0 & LLKHF_INJECTED.0 == 0 && on_key(translate(kb.vkCode), down) {
-            return LRESULT(1);
+        if kb.flags.0 & LLKHF_INJECTED.0 == 0 {
+            let key = translate(kb.vkCode);
+            // Shift always passes through: a bare Shift is harmless to the app behind, and
+            // swallowing it would hide it from GetAsyncKeyState (`|` detection).
+            if on_key(key, down) && !matches!(key, Key::Preview | Key::Search) {
+                return LRESULT(1);
+            }
         }
     }
     CallNextHookEx(None, code, wp, lp)

@@ -9,9 +9,6 @@ mod keys;
 mod platform;
 mod switcher;
 
-#[cfg(windows)]
-use tauri::Manager;
-
 #[tauri::command]
 fn activate(id: keys::WinId) {
     switcher::activate(id);
@@ -31,6 +28,13 @@ fn key(key: String, down: bool) {
 #[tauri::command]
 fn ready() {
     switcher::refresh();
+}
+
+/// Where the webview laid out Shift previews: (window id, x, y, w, h) in CSS px.
+#[cfg(windows)]
+#[tauri::command]
+fn thumbs(window: tauri::WebviewWindow, rects: Vec<(keys::WinId, f64, f64, f64, f64)>) {
+    platform::thumbs(&window, &rects);
 }
 
 /// `keytab --toggle` / `keytab --search`, for compositor keybinds.
@@ -65,8 +69,12 @@ fn main() {
         }
     }));
 
+    #[cfg(windows)]
+    let builder = builder.invoke_handler(tauri::generate_handler![activate, hide, key, ready, thumbs]);
+    #[cfg(not(windows))]
+    let builder = builder.invoke_handler(tauri::generate_handler![activate, hide, key, ready]);
+
     builder
-        .invoke_handler(tauri::generate_handler![activate, hide, key, ready])
         .setup(move |app| {
             #[cfg(target_os = "linux")]
             if quit {

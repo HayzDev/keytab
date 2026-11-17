@@ -60,6 +60,11 @@
   .row:hover { background: var(--hover); }
   .row.sel { background: var(--sel); }
   .row.dim { opacity: 0.25; }
+  /* Shift previews: Windows draws a live DWM thumbnail over each box (see thumbs()). */
+  .thumb { flex: none; width: 104px; height: 66px; border-radius: 6px; background: var(--key-bg);
+    display: grid; place-items: center; color: var(--muted); font-size: 11px; }
+  .row.big { flex-wrap: wrap; }
+  .row.big .thumb { order: 9; width: 100%; height: 240px; }
   kbd {
     flex: none; min-width: 2.4em; padding: 3px 0; border-radius: 6px;
     background: var(--key-bg); text-align: center;
@@ -162,8 +167,22 @@
   addEventListener('keydown', forward(true));
   addEventListener('keyup', forward(false));
 
-  listen('view', ({ payload: { rows, typed, search, edit, dom_input, selected } }) => {
+  // Tell Rust where the preview boxes are (CSS px); boxes scrolled out of view get none.
+  let sentThumbs = '[]';
+  function sendThumbs() {
+    const list = $('list').getBoundingClientRect();
+    const rects = [...document.querySelectorAll('.thumb')].flatMap(t => {
+      const r = t.getBoundingClientRect();
+      return r.top >= list.top && r.bottom <= list.bottom ? [[+t.dataset.id, r.x, r.y, r.width, r.height]] : [];
+    });
+    const json = JSON.stringify(rects);
+    if (json !== sentThumbs) { sentThumbs = json; invoke('thumbs', { rects }); }
+  }
+  $('list').onscroll = sendThumbs;
+
+  listen('view', ({ payload: { rows, typed, search, edit, dom_input, selected, preview } }) => {
     domInput = dom_input;
+    preview = preview && !edit;
     renderEdit(edit);
     $('card').hidden = rows.length === 0 && !search;
     $('search').hidden = !search;
@@ -188,11 +207,18 @@
       const appLen = [...w.app].length;
       const title = w.title === w.app ? '' : w.title;
       row.append(kbd, highlight(el('span', 'app'), w.app, hits, 0), highlight(el('span', 'title'), title, hits, appLen + 1));
+      if (preview) {
+        const thumb = el('div', 'thumb', 'No preview');
+        thumb.dataset.id = w.id;
+        row.prepend(thumb);
+        row.classList.toggle('big', !search && typed.length > 0 && w.id === selected);
+      }
       return row;
     }));
 
     if (search && rows.length === 0) $('list').replaceChildren(el('div', 'empty', 'No matching windows'));
     $('list').querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
+    sendThumbs();
   }).then(() => invoke('ready'));
 
   // Clicking the transparent area around the card dismisses.
