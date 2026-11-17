@@ -408,6 +408,7 @@ fn translate(vk: u32) -> Key {
         VK_OEM_PERIOD => Key::Char('.'),
         _ if matches!(vk, 0x30..=0x39 | 0x41..=0x5A) => Key::Char((vk as u8 as char).to_ascii_lowercase()),
         _ if types_char(vk, '|') => Key::HintApp,
+        _ if types_char(vk, '/') => Key::Slash,
         _ if types_char(vk, '\\') => Key::HintWindow,
         _ => Key::Other,
     }

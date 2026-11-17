@@ -11,6 +11,7 @@ Inspired by [Adam Basis](https://www.youtube.com/@AdamBasis)'s alt-tab videos.
 | hold Right Alt + **Right Shift** / `keytab --search` | open in fuzzy search |
 | letters | focus the window with that hint (two letters when first letters clash) |
 | **Right Shift** (while open) | switch to search mode; press again to go back to hints |
+| `/` | switch from hints to search mode |
 | hold **Left Shift** | preview the selected window; release to focus a unique match |
 | Backspace | undo a typed letter / query character |
 | ↑ ↓ or **Alt+K / Alt+J** | move the selection in either mode |

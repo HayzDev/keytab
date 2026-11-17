@@ -38,6 +38,8 @@ pub enum Key {
     HintWindow,
     /// `|`: saved hint for every window of the app.
     HintApp,
+    /// `/`: hint mode -> search mode.
+    Slash,
     /// Lowercase letter/digit, or ' ', '-', '.'.
     Char(char),
     /// A shifted number-row symbol, used as a digit only while previewing hints.
@@ -59,6 +61,7 @@ impl Key {
             "Shift" => Key::Preview,
             "\\" => Key::HintWindow,
             "|" => Key::HintApp,
+            "/" => Key::Slash,
             _ => {
                 let mut cs = key.chars();
                 match (cs.next(), cs.next()) {
@@ -445,6 +448,7 @@ pub fn on_key(key: Key, down: bool) -> bool {
             }
         }
         // Edit the selected window among those still matching the hint prefix.
+        Key::Slash => open_search(&mut s),
         k if k.hint_scope().is_some() => {
             if let Some(i) = selected_hint(&s).and_then(|id| s.wins.iter().position(|w| w.id == id)) {
                 start_edit(&mut s, i, k.hint_scope().unwrap());
@@ -523,6 +527,7 @@ fn on_search_key(s: &mut State, key: Key) -> bool {
             q.hits = rank(&s.wins, &q.query);
             q.sel = 0;
         }
+        Key::Slash => return true,
         _ => return false,
     }
     emit(s);
@@ -624,6 +629,7 @@ mod tests {
         assert_eq!(Key::from_dom("A"), Key::Char('a'));
         assert_eq!(Key::from_dom("CapsLock"), Key::Esc);
         assert_eq!(Key::from_dom("|"), Key::HintApp);
+        assert_eq!(Key::from_dom("/"), Key::Slash);
         assert_eq!(Key::from_dom("\\"), Key::HintWindow);
         assert_eq!(Key::from_dom("Shift"), Key::Preview);
         assert_eq!(Key::from_dom("é"), Key::Other);
@@ -705,6 +711,21 @@ mod tests {
         super::on_key(Key::from_dom("@"), true);
         let mut s = super::STATE.lock().unwrap();
         assert_eq!(s.search.as_ref().unwrap().query, "", "shifted digits must not change search input");
+        super::close(&mut s);
+    }
+
+    #[test]
+    fn slash_opens_search_from_hint_mode() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        drop(s);
+        assert!(super::on_key(Key::Slash, true));
+        assert!(super::STATE.lock().unwrap().search.is_some());
+        assert!(super::on_key(Key::Slash, true), "swallowed in search too");
+        let mut s = super::STATE.lock().unwrap();
+        assert_eq!(s.search.as_ref().unwrap().query, "");
         super::close(&mut s);
     }
 
