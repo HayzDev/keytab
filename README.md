@@ -10,7 +10,8 @@ Inspired by [Adam Basis](https://www.youtube.com/@AdamBasis)'s alt-tab videos.
 | **Right Alt** (Windows) / your niri bind | open / close |
 | hold Right Alt + **Right Shift** / `keytab --search` | open in fuzzy search |
 | letters | focus the window with that hint (two letters when first letters clash) |
-| hold **Shift** | show window thumbnails; hint letters enlarge the top remaining preview; release to focus a unique match |
+| **Right Shift** (while open) | switch to search mode; press again to go back to hints |
+| hold **Left Shift** | preview the selected window; release to focus a unique match |
 | Backspace | undo a typed letter / query character |
 | ↑ ↓ or **Alt+K / Alt+J** | move the selection in either mode |
 | Enter | focus the selected window in either mode |
@@ -117,7 +118,7 @@ Window list, focus and close go through `niri msg --json windows` and `niri msg 
 
 ### Windows previews
 
-Holding Shift (either one; Right Shift still means search while Right Alt is held)
+Holding Left Shift (Right Shift toggles search mode)
 shows one large live preview of the selected window under the list; arrow keys change
 it. It's a DWM thumbnail (`DwmRegisterThumbnail`) drawn over a box the webview lays out
 and reports through the `layout` command, sized to the window's shape. A minimized

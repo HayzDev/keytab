@@ -238,10 +238,10 @@
       .map(w => w.key[typed.length].toUpperCase()))];
     $('foot').innerHTML =
       edit ? keys(['↵', 'save'], ['Del', 'reset to automatic'], ['Esc', 'back'])
-      : search ? keys(['↑↓', 'select'], ['↵', 'open'], ['Del', 'close'], ['\\', 'set hint'], ['Esc', 'dismiss'])
+      : search ? keys(['↑↓', 'select'], ['↵', 'open'], ['Del', 'close'], ['\\', 'set hint'], ['R⇧', 'hints'], ['Esc', 'dismiss'])
       : typed ? `<span>${next.map(c => `<kbd>${c}</kbd>`).join('<span class="or">or</span>')}to finish</span>` + keys(...(preview ? [['⇧', 'release to open']] : []), ['⌫', 'back'], ['Esc', 'dismiss'])
       : preview ? keys(['↑↓', 'select'], ['⇧', 'release to open'], ['a–z 0–9', 'narrow'], ['Esc', 'dismiss'])
-      : keys(['a–z 0–9', 'type hint'], ['↑↓', 'select'], ['↵', 'open'], ['⇧', 'preview'], ['Del', 'close'], ['\\', 'set hint'], ['Esc', 'dismiss']);
+      : keys(['a–z 0–9', 'type hint'], ['↑↓ ↵', 'select'], ['L⇧', 'preview'], ['R⇧', 'search'], ['Del', 'close'], ['\\', 'set hint'], ['Esc', 'dismiss']);
   }
 
   // Where there's no global keyboard hook (Wayland), the overlay has focus and forwards

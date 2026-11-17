@@ -92,7 +92,7 @@ pub(crate) fn init(window: &gtk::Window) {
         }
     });
     window.connect_key_press_event(|_, event| {
-        if key(event) != Key::Preview && event.state().contains(gtk::gdk::ModifierType::SHIFT_MASK) {
+        if !matches!(key(event), Key::Preview | Key::Search) && event.state().contains(gtk::gdk::ModifierType::SHIFT_MASK) {
             switcher::on_key(Key::Preview, true);
         }
         switcher::on_key(key(event), true);
@@ -118,7 +118,8 @@ fn key(event: &gtk::gdk::EventKey) -> Key {
         "Down" => Key::Down,
         "Delete" | "KP_Delete" => Key::Delete,
         "Alt_L" | "Alt_R" => Key::Alt,
-        "Shift_L" | "Shift_R" => Key::Preview,
+        "Shift_L" => Key::Preview,
+        "Shift_R" => Key::Search,
         _ => event.keyval().to_unicode().map_or(Key::Other, |c| Key::from_dom(&c.to_string())),
     }
 }

@@ -116,6 +116,8 @@ struct State {
     alt_held: bool,
     alt_swallowed: bool,
     preview_held: bool,
+    /// Right Shift is down (so key repeat doesn't keep toggling search).
+    search_held: bool,
     typed: String,
     selected: Option<WinId>,
     wins: Vec<Win>,
@@ -133,6 +135,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     alt_held: false,
     alt_swallowed: false,
     preview_held: false,
+    search_held: false,
     typed: String::new(),
     selected: None,
     wins: Vec::new(),
@@ -329,8 +332,6 @@ pub fn activate(id: WinId) {
 /// Feed one key event. Returns true if keytab used it (a global hook should swallow it).
 pub fn on_key(key: Key, down: bool) -> bool {
     let mut s = STATE.lock().unwrap();
-    // Right Shift searches only as a chord with Activate; on its own it previews like Shift.
-    let key = if key == Key::Search && !(down && s.activate_held) { Key::Preview } else { key };
     match key {
         Key::Preview => {
             if !s.open { return false; }
@@ -351,9 +352,23 @@ pub fn on_key(key: Key, down: bool) -> bool {
             s.activate_held = down;
             return true;
         }
-        Key::Search if down && s.activate_held => {
-            open_search(&mut s);
-            return true;
+        // With Activate held, Right Shift opens straight into search. On its own, while
+        // open, it flips between hint mode and search mode.
+        Key::Search => {
+            let was_held = std::mem::replace(&mut s.search_held, down);
+            let pressed = down && !was_held;
+            if !pressed {
+                return s.open;
+            }
+            if s.activate_held || (s.open && s.search.is_none() && s.edit.is_none()) {
+                open_search(&mut s);
+            } else if s.open && s.edit.is_none() {
+                s.search = None;
+                s.typed.clear();
+                s.selected = None;
+                emit(&s);
+            }
+            return s.open;
         }
         // Alt is swallowed while open, else the app behind sees a bare Alt tap (the J/K
         // never reach it) and opens its menu bar. Swallow the release only if we swallowed
@@ -694,17 +709,21 @@ mod tests {
     }
 
     #[test]
-    fn right_shift_searches_only_with_activate() {
+    fn right_shift_toggles_search_mode() {
         let _guard = STATE_TEST.lock().unwrap();
         let mut s = super::STATE.lock().unwrap();
         super::close(&mut s);
         s.open = true;
         drop(s);
         super::on_key(Key::Search, true);
-        assert!(super::STATE.lock().unwrap().preview_held, "bare Right Shift previews");
+        super::on_key(Key::Search, true); // key repeat must not toggle back
+        assert!(super::STATE.lock().unwrap().search.is_some(), "Right Shift enters search");
+        super::on_key(Key::Search, false);
+        super::on_key(Key::Search, true);
         super::on_key(Key::Search, false);
         let mut s = super::STATE.lock().unwrap();
-        assert!(!s.preview_held && s.search.is_none());
+        assert!(s.open && s.search.is_none(), "pressing it again goes back to hints");
+        assert!(!s.preview_held);
         super::close(&mut s);
     }
 
