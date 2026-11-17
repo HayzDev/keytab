@@ -132,6 +132,8 @@ struct State {
     wins: Vec<Win>,
     search: Option<Search>,
     edit: Option<Edit>,
+    /// Del was pressed once on this window; a second Del closes it, any other key cancels.
+    closing: Option<WinId>,
     /// User-chosen hints per window. Lives as long as the window does.
     custom: BTreeMap<WinId, String>,
     /// User-chosen hints per app (lowercase app name). Saved to disk.
@@ -152,6 +154,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     wins: Vec::new(),
     search: None,
     edit: None,
+    closing: None,
     custom: BTreeMap::new(),
     app_hints: BTreeMap::new(),
 });
@@ -222,6 +225,8 @@ pub(crate) struct View<'a> {
     /// Ctrl+P has previews on regardless of Shift.
     pub(crate) pinned: bool,
     pub(crate) selected: Option<WinId>,
+    /// Del is armed on this window: the next Del closes it.
+    pub(crate) closing: Option<WinId>,
 }
 
 fn emit(s: &State) {
@@ -234,7 +239,7 @@ fn emit(s: &State) {
         None => (s.wins.iter().filter(|w| !s.preview_held || w.key.starts_with(&s.typed)).map(|w| Row { win: w, hits: &[] }).collect(), None),
     };
     let selected = s.search.as_ref().map_or_else(|| selected_hint(s), |q| q.hits.get(q.sel).map(|(i, _)| s.wins[*i].id));
-    let view = View { rows, typed: &s.typed, search, edit: s.edit.as_ref(), dom_input: !platform::GLOBAL_INPUT, preview: s.preview_held, pinned: s.previews_pinned, selected };
+    let view = View { rows, typed: &s.typed, search, edit: s.edit.as_ref(), dom_input: !platform::GLOBAL_INPUT, preview: s.preview_held, pinned: s.previews_pinned, selected, closing: s.closing };
     #[cfg(windows)]
     let _ = _app.emit("view", view);
     #[cfg(target_os = "linux")]
@@ -319,6 +324,7 @@ fn close(s: &mut State) {
     s.selected = None;
     s.search = None;
     s.edit = None;
+    s.closing = None;
     s.wins.clear();
     if let Some(w) = OVERLAY.get() {
         platform::hide(w);
@@ -422,6 +428,12 @@ pub fn on_key(key: Key, down: bool) -> bool {
         }
         return false;
     }
+    // Any key but a second Del disarms a pending close; Esc then only cancels it.
+    let armed = s.closing.take();
+    if armed.is_some() {
+        emit(&s);
+        if key == Key::Esc { return true; }
+    }
     let key = match key {
         Key::ShiftDigit(c) if s.preview_held && s.search.is_none() => Key::Char(c),
         Key::ShiftDigit(_) => Key::Other,
@@ -433,7 +445,7 @@ pub fn on_key(key: Key, down: bool) -> bool {
         return on_edit_key(&mut s, key);
     }
     if s.search.is_some() {
-        return on_search_key(&mut s, key);
+        return on_search_key(&mut s, key, armed);
     }
     match key {
         Key::Esc => close(&mut s),
@@ -454,6 +466,11 @@ pub fn on_key(key: Key, down: bool) -> bool {
         }
         Key::Delete => {
             if let Some(id) = selected_hint(&s) {
+                if armed != Some(id) {
+                    s.closing = Some(id);
+                    emit(&s);
+                    return true;
+                }
                 platform::close(id);
                 s.wins.retain(|w| w.id != id);
                 s.typed.clear();
@@ -519,7 +536,7 @@ fn start_edit(s: &mut State, i: usize, scope: Scope) {
     });
 }
 
-fn on_search_key(s: &mut State, key: Key) -> bool {
+fn on_search_key(s: &mut State, key: Key, armed: Option<WinId>) -> bool {
     let q = s.search.as_mut().unwrap();
     match key {
         Key::Esc => {
@@ -534,6 +551,11 @@ fn on_search_key(s: &mut State, key: Key) -> bool {
         }
         Key::Delete => {
             let Some(&(i, _)) = q.hits.get(q.sel) else { return true };
+            if armed != Some(s.wins[i].id) {
+                s.closing = Some(s.wins[i].id);
+                emit(s);
+                return true;
+            }
             platform::close(s.wins[i].id);
             s.wins.remove(i);
             q.query.clear();
@@ -586,42 +608,52 @@ fn on_edit_key(s: &mut State, key: Key) -> bool {
         }
         Key::Enter if e.keys.is_empty() => s.edit = None,
         Key::Enter => {
-            // User hints must stay prefix-free against each other; auto keys re-flow.
-            let wins = &s.wins;
-            let name = |id: WinId| wins.iter().find(|w| w.id == id).map_or("another window".into(), |w| w.app.clone());
-            let windows = s.custom.iter().filter(|(id, _)| !(e.scope == Scope::Window && **id == e.id));
-            let apps = s.app_hints.iter().filter(|(a, _)| !(e.scope == Scope::App && **a == app));
-            let clash = windows
-                .map(|(id, k)| (name(*id), k.clone()))
-                .chain(apps.map(|(a, k)| (format!("every {a} window"), k.clone())))
-                .find(|(_, k)| k.starts_with(e.keys.as_str()) || e.keys.starts_with(k.as_str()));
-            match (clash, e.scope) {
-                (Some((who, k)), _) => e.error = Some(format!("Conflicts with {who} ({})", k.to_uppercase())),
-                (None, Scope::Window) => {
+            e.error = clash(&s.wins, &s.custom, &s.app_hints, e);
+            match (e.error.is_some(), e.scope) {
+                (true, _) => {}
+                (false, Scope::Window) => {
                     s.custom.insert(e.id, e.keys.clone());
                     finish_edit(s);
                 }
-                (None, Scope::App) => {
+                (false, Scope::App) => {
                     s.app_hints.insert(app, e.keys.clone());
                     save_app_hints(&s.app_hints);
                     finish_edit(s);
                 }
             }
         }
+        // Report a clash while typing, before Enter is pressed.
         Key::Back => {
             e.keys.pop();
-            e.error = None;
+            e.error = clash(&s.wins, &s.custom, &s.app_hints, e);
         }
         Key::Char(c) if c.is_ascii_alphanumeric() => {
             if e.keys.len() < MAX_HINT {
                 e.keys.push(c);
             }
-            e.error = None;
+            e.error = clash(&s.wins, &s.custom, &s.app_hints, e);
         }
         _ => return false,
     }
     emit(s);
     true
+}
+
+/// User hints must stay prefix-free against each other (auto keys re-flow around them).
+fn clash(wins: &[Win], custom: &BTreeMap<WinId, String>, app_hints: &BTreeMap<String, String>, e: &Edit) -> Option<String> {
+    if e.keys.is_empty() { return None; }
+    let app = e.app.to_lowercase();
+    let name = |id: &WinId| wins.iter().find(|w| w.id == *id).map_or("another window".into(), |w| w.app.clone());
+    let windows = custom.iter().filter(|(id, _)| !(e.scope == Scope::Window && **id == e.id));
+    let apps = app_hints.iter().filter(|(a, _)| !(e.scope == Scope::App && **a == app));
+    windows
+        .map(|(id, k)| (name(id), k))
+        .chain(apps.map(|(a, k)| {
+            let shown = wins.iter().find(|w| w.app.to_lowercase() == *a).map_or(a.as_str(), |w| w.app.as_str());
+            (format!("every {shown} window"), k)
+        }))
+        .find(|(_, k)| k.starts_with(e.keys.as_str()) || e.keys.starts_with(k.as_str()))
+        .map(|(who, k)| format!("Conflicts with {who} ({})", k.to_uppercase()))
 }
 
 fn finish_edit(s: &mut State) {
@@ -776,6 +808,31 @@ mod tests {
         let mut s = super::STATE.lock().unwrap();
         assert!(s.open && s.previews_pinned, "pinning previews doesn't jump to the P hint");
         s.previews_pinned = false;
+        super::close(&mut s);
+    }
+
+    #[test]
+    fn delete_needs_a_second_press_and_other_keys_cancel_it() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(2, "Paint".into(), "Art".into())];
+        s.wins[0].key = "c".into();
+        s.wins[1].key = "p".into();
+        drop(s);
+        super::on_key(Key::Delete, true);
+        assert_eq!(super::STATE.lock().unwrap().closing, Some(2), "first Del only arms");
+        assert!(super::on_key(Key::Esc, true));
+        {
+            let s = super::STATE.lock().unwrap();
+            assert!(s.open && s.closing.is_none(), "Esc cancels the close, not the switcher");
+            assert_eq!(s.wins.len(), 2);
+        }
+        super::on_key(Key::Delete, true);
+        super::on_key(Key::Down, true);
+        assert!(super::STATE.lock().unwrap().closing.is_none(), "moving disarms");
+        let mut s = super::STATE.lock().unwrap();
         super::close(&mut s);
     }
 

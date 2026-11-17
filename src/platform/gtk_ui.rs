@@ -362,6 +362,12 @@ pub(crate) fn render(view: &View<'_>) {
                 });
                 ui.content.pack_start(&scroll, true, true, 0);
             }
+            if view.closing.is_some() {
+                let confirm = label("Delete again to close the selected window · Esc cancels", "keytab-help");
+                confirm.set_margin_start(16);
+                confirm.set_margin_bottom(12);
+                ui.content.pack_start(&confirm, false, false, 0);
+            }
         }
         for child in ui.content.children() { child.show_all(); }
         ui.content.show();

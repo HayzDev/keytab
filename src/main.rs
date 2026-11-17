@@ -44,12 +44,16 @@ fn handle_args<S: AsRef<str>>(args: &[S]) {
     } else if args.iter().any(|a| a.as_ref() == "--toggle") {
         switcher::toggle();
     }
-    // Debug builds: `--keys=^ab` presses keys after opening (^ = hold Shift), for
+    // Debug builds: `--keys=^ab` presses keys after opening (^ = hold Shift, ~ = Del), for
     // screenshots, since the Windows hook ignores synthetic input.
     #[cfg(debug_assertions)]
     for a in args.iter().filter_map(|a| a.as_ref().strip_prefix("--keys=")) {
         for c in a.chars() {
-            let key = if c == '^' { switcher::Key::Preview } else { switcher::Key::from_dom(&c.to_string()) };
+            let key = match c {
+                '^' => switcher::Key::Preview,
+                '~' => switcher::Key::Delete,
+                _ => switcher::Key::from_dom(&c.to_string()),
+            };
             switcher::on_key(key, true);
         }
     }
