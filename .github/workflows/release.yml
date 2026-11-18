@@ -12,7 +12,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Check tag matches Cargo.toml version
         shell: bash
         run: |
@@ -20,7 +20,7 @@ jobs:
           [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME != Cargo.toml v$version"; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: lts/*
       - run: npx --yes @tauri-apps/cli@2 build
@@ -44,7 +44,7 @@ jobs:
           dnf install -y --setopt=install_weak_deps=False git gcc gcc-c++ make pkgconf \
             webkit2gtk4.1-devel openssl-devel librsvg2-devel gtk3-devel gtk-layer-shell-devel \
             wayland-devel wayland-protocols-devel
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked
