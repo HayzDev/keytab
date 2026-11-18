@@ -539,3 +539,33 @@ pub fn start_input() {
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
     });
 }
+
+// ---- start at login ---------------------------------------------------------------
+
+/// `HKCU\...\Run` value that starts keytab at login. The installer sets it on first install.
+const RUN_KEY: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
+const RUN_VALUE: PCWSTR = w!("keytab");
+
+pub fn autostart() -> bool {
+    use windows::Win32::System::Registry::*;
+    unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE, RRF_RT_REG_SZ, None, None, None).is_ok() }
+}
+
+pub fn set_autostart(on: bool) {
+    use windows::Win32::System::Registry::*;
+    let mut key = HKEY::default();
+    unsafe {
+        if RegCreateKeyW(HKEY_CURRENT_USER, RUN_KEY, &mut key).is_err() {
+            return;
+        }
+        if on {
+            let Ok(exe) = std::env::current_exe() else { return };
+            let cmd: Vec<u16> = format!("\"{}\"", exe.display()).encode_utf16().chain([0]).collect();
+            let bytes = std::slice::from_raw_parts(cmd.as_ptr() as *const u8, cmd.len() * 2);
+            let _ = RegSetValueExW(key, RUN_VALUE, None, REG_SZ, Some(bytes));
+        } else {
+            let _ = RegDeleteValueW(key, RUN_VALUE);
+        }
+        let _ = RegCloseKey(key);
+    }
+}

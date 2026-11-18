@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "keytab",
-  "version": "0.1.0",
   "identifier": "dev.keytab.app",
   "build": { "frontendDist": "ui" },
   "app": {
@@ -25,5 +24,25 @@
       }
     ]
   },
-  "bundle": { "active": true, "targets": ["nsis"], "icon": ["icons/icon.ico", "icons/icon.png"] }
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "publisher": "HayzDev",
+    "homepage": "https://github.com/HayzDev/keytab",
+    "copyright": "Copyright (c) 2026 HayzDev. MIT License.",
+    "category": "Utility",
+    "shortDescription": "Keyboard-first Alt-Tab replacement",
+    "longDescription": "Press Right Alt, type a window's letters, and that window gets focus.",
+    "license": "MIT",
+    "licenseFile": "LICENSE",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "installer/hooks.nsh"
+      }
+    }
+  }
 }

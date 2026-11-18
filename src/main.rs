@@ -126,17 +126,26 @@ fn main() {
         .expect("error while running keytab");
 }
 
-/// Windows-only tray with Quit. (On niri: `keytab --quit`.)
+/// Windows-only tray with Start at login and Quit. (On niri: `keytab --quit`.)
 #[cfg(windows)]
 fn tray(app: &mut tauri::App) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem};
+    use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::TrayIconBuilder;
+    let login = CheckMenuItem::with_id(app, "login", "Start at login", true, platform::autostart(), None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit keytab", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&login, &PredefinedMenuItem::separator(app)?, &quit])?;
     TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
         .tooltip("keytab — Right Alt to switch, + Right Shift to search")
-        .menu(&Menu::with_items(app, &[&quit])?)
-        .on_menu_event(|app, e| if e.id == "quit" { app.exit(0) })
+        .menu(&menu)
+        .on_menu_event(move |app, e| match e.id.as_ref() {
+            "login" => {
+                platform::set_autostart(!platform::autostart());
+                let _ = login.set_checked(platform::autostart());
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
         .build(app)?;
     Ok(())
 }

@@ -3,6 +3,41 @@
 A keyboard-first Alt-Tab replacement (Rust + Tauri 2). Open it, type a window's letter(s), and that window gets focus.
 Inspired by [Adam Basis](https://www.youtube.com/@AdamBasis)'s alt-tab videos.
 
+## Install
+
+### Windows 10 / 11
+
+**[⬇ Download keytab-setup.exe](https://github.com/HayzDev/keytab/releases/latest/download/keytab-setup.exe)** and run it. No admin rights needed.
+
+Or paste this into PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/HayzDev/keytab/main/install.ps1 | iex
+```
+
+keytab then runs in the tray and starts at login. To turn that off, right-click the tray icon and untick **Start at login**.
+Press **Right Alt** to switch windows. To uninstall, use *Settings → Apps → keytab*.
+
+> The installer isn't code-signed yet, so Windows SmartScreen may say "Windows protected your PC".
+> Click **More info → Run anyway**.
+
+### Linux (niri)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/HayzDev/keytab/main/install.sh | sh
+```
+
+This installs `keytab` and `keytabctl` to `~/.local/bin`, adds the keybinds to your niri config, and starts keytab.
+Press **Alt+Tab** or **Mod+Tab** (add Shift for search). The prebuilt binary is built on Fedora 44 (x86_64) and needs these runtime packages:
+
+```sh
+sudo dnf install webkit2gtk4.1 gtk3 gtk-layer-shell python3-gobject gstreamer1-plugins-base pipewire-gstreamer
+```
+
+On other distros, or if the binary won't start, [build from source](#build).
+
+All downloads are on the [Releases page](https://github.com/HayzDev/keytab/releases).
+
 ## Keys
 
 | Key | Does |
@@ -46,7 +81,25 @@ cargo build --release  # target/release/keytab(.exe)
 cargo test
 ```
 
-No Node/npm needed. Linux uses native GTK widgets; Windows uses `ui/index.html`.
+No Node/npm needed to build or run. Linux uses native GTK widgets; Windows uses `ui/index.html`.
+
+### Windows installer
+
+```sh
+npx @tauri-apps/cli@2 build   # target/release/bundle/nsis/keytab_<version>_x64-setup.exe
+```
+
+### Releasing
+
+Bump `version` in `Cargo.toml`, commit, then push a matching tag:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The [Release workflow](.github/workflows/release.yml) builds the Windows installer and the Linux
+archive and publishes them as a GitHub release. `keytab-setup.exe` and `keytab-linux-x86_64.tar.gz`
+keep the same names every release, so the `releases/latest/download/...` links always work.
 
 ### Fedora deps
 
@@ -173,3 +226,7 @@ To port to another platform or compositor:
 Translate input to `switcher::Key` and call `switcher::on_key`. Platforms without
 a global hook set `GLOBAL_INPUT = false` and deliver keys from the focused overlay.
 Render the shared view using the platform's UI backend.
+
+## License
+
+[MIT](LICENSE)

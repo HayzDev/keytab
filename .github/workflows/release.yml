@@ -1,0 +1,90 @@
+name: Release
+
+# Push a tag like v0.2.0 (matching the version in Cargo.toml) to publish a release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches Cargo.toml version
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME != Cargo.toml v$version"; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - run: npx --yes @tauri-apps/cli@2 build
+      - name: Collect installer
+        shell: bash
+        run: |
+          mkdir dist
+          cp target/release/bundle/nsis/*-setup.exe dist/
+          cp target/release/bundle/nsis/*-setup.exe dist/keytab-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  linux:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False git gcc gcc-c++ make pkgconf \
+            webkit2gtk4.1-devel openssl-devel librsvg2-devel gtk3-devel gtk-layer-shell-devel \
+            wayland-devel wayland-protocols-devel
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - name: Package
+        run: |
+          dir=keytab-linux-x86_64
+          mkdir -p "$dir" dist
+          cp target/release/keytab scripts/keytabctl niri.kdl install.sh LICENSE README.md "$dir/"
+          chmod +x "$dir/keytab" "$dir/keytabctl" "$dir/install.sh"
+          tar -czf "dist/$dir.tar.gz" "$dir"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Install
+
+          **Windows:** download **keytab-setup.exe** below and run it (no admin needed). Or, in PowerShell:
+          ```powershell
+          irm https://raw.githubusercontent.com/HayzDev/keytab/main/install.ps1 | iex
+          ```
+          Press **Right Alt** to switch windows. Windows SmartScreen may warn because the installer isn't code-signed: click *More info → Run anyway*.
+
+          **Linux (niri):**
+          ```sh
+          curl -fsSL https://raw.githubusercontent.com/HayzDev/keytab/main/install.sh | sh
+          ```
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "keytab $GITHUB_REF_NAME" --notes-file notes.md --generate-notes
