@@ -126,19 +126,20 @@
 
   /* Shift: one large live preview of the selected window under an unchanged list, with no
      caption (the selected row names it). Windows draws it with DWM over this box; the box
-     itself only shows when there's nothing to draw. */
+     itself only shows when there's nothing to draw. On Windows the thumbnail lives in its own
+     popup that Windows rounds (4px, win32 `FRAME`); this radius matches it. */
   /* The ring sits outside the box, where the DWM thumbnail doesn't draw, so it frames
      dark previewed windows against the panel. */
   #preview {
-    margin: 8px 6px 6px; border-radius: 6px; background: var(--well); box-shadow: 0 0 0 1px var(--edge);
+    margin: 8px auto 6px; border-radius: 4px; background: var(--well); box-shadow: 0 0 0 1px var(--edge);
     display: grid; place-items: center; overflow: hidden;
   }
   #preview[hidden] { display: none; }
   #preview .icon, #preview .mono { width: 40px; height: 40px; font-size: 20px; }
 
   /* Key legend: the same component in every mode. */
-  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
-  .keys kbd { width: auto; min-width: 1.7em; padding: 1px 5px; margin-right: 5px; font-size: 12px; color: var(--text); border-radius: 5px; background: linear-gradient(rgba(255,255,255,.045), transparent), rgba(255,255,255,.07); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .keys kbd { width: auto; min-width: 1.7em; padding: 1px 5px; margin-right: 4px; font-size: 12px; color: var(--text); border-radius: 5px; background: linear-gradient(rgba(255,255,255,.045), transparent), rgba(255,255,255,.07); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
   .keys .or { margin: 0 5px 0 0; }
   .keys .plus { margin: 0 3px 0 -2px; }
   .keys .aux { margin-left: auto; display: flex; gap: inherit; }
@@ -274,11 +275,11 @@
       return $('foot').innerHTML = `<span class="warn">Close ${esc(w?.app ?? 'this')} window?</span>`
         + keys(['Del', 'close window'], ['Esc', 'cancel']);
     }
-    const pin = ['Ctrl+P', pinned ? 'turn preview off' : 'keep preview on'];
+    const pin = ['Ctrl+P', pinned ? 'preview off' : 'keep preview'];
     // Holding Shift adds to the mode's footer rather than replacing it: the preview is already
     // up, so L⇧ becomes Ctrl+P. Typing a prefix is a short step: finish it, open, or back out.
     // With Shift down, / types "?", so only R⇧ switches.
-    const mode = search ? ['R⇧', 'back to hints'] : [preview ? 'R⇧' : 'R⇧ or /', 'search'];
+    const mode = search ? ['R⇧', 'back to hints'] : ['R⇧', 'search'];
     const left = typed ? [['⌫', 'back'], preview || pinned ? pin : ['L⇧', 'preview']]
       : [preview || pinned ? pin : ['L⇧', 'preview'], mode];
     const aux = (preview || typed ? [] : [['\\', 'set hint'], ['Del', 'close window']]).concat([['Esc', 'dismiss']]);
@@ -319,7 +320,11 @@
     const p = $('preview');
     if (p.hidden) return;
     const a = aspects.get(+p.dataset.id) || 16 / 10;
-    p.style.height = `${Math.round(Math.min(320, Math.max(160, p.clientWidth / a)))}px`;
+    // Fit the window's aspect: past the height cap the box narrows (centered) instead of
+    // the cover-crop cutting off the bottom of tall windows.
+    const full = $('card').clientWidth - 12, h = Math.min(320, full / a);
+    p.style.height = `${Math.round(h)}px`;
+    p.style.width = `${Math.round(Math.min(full, h * a))}px`;
   }
   $('list').onscroll = sendLayout;
   new ResizeObserver(sendLayout).observe($('card'));

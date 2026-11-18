@@ -274,6 +274,7 @@ pub fn init(overlay: &WebviewWindow) -> tauri::Result<()> {
     unsafe {
         let round = DWMWCP_ROUND;
         let _ = DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &round as *const _ as _, size_of_val(&round) as u32);
+        create_frame(h);
         let Ok(user32) = GetModuleHandleW(w!("user32.dll")) else { return Ok(()) };
         let Some(f) = GetProcAddress(user32, s!("SetWindowCompositionAttribute")) else { return Ok(()) };
         let f: unsafe extern "system" fn(HWND, *mut CompositionData) -> BOOL = std::mem::transmute(f);
@@ -324,6 +325,39 @@ pub fn hide(_overlay: &WebviewWindow) {
     }
 }
 
+/// The preview's own window. A DWM thumbnail is a plain rectangle that nothing in the webview
+/// can clip, so it's drawn into this borderless popup (owned by the overlay, so it stays above
+/// it) and Windows 11 rounds the popup's corners. Created on the UI thread by `init`.
+static FRAME: AtomicIsize = AtomicIsize::new(0);
+
+fn frame() -> HWND {
+    HWND(FRAME.load(Ordering::Relaxed) as *mut _)
+}
+
+unsafe extern "system" fn frame_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    DefWindowProcW(h, msg, wp, lp)
+}
+
+unsafe fn create_frame(owner: HWND) {
+    let Ok(inst) = GetModuleHandleW(None) else { return };
+    let class = w!("keytab-preview");
+    RegisterClassW(&WNDCLASSW {
+        lpfnWndProc: Some(frame_proc),
+        hInstance: inst.into(),
+        lpszClassName: class,
+        hbrBackground: HBRUSH(GetStockObject(BLACK_BRUSH).0),
+        ..Default::default()
+    });
+    let ex = WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
+    let Ok(f) = CreateWindowExW(ex, class, w!(""), WS_POPUP, 0, 0, 1, 1, Some(owner), None, Some(inst.into()), None) else { return };
+    let small = DWMWCP_ROUNDSMALL;
+    let _ = DwmSetWindowAttribute(f, DWMWA_WINDOW_CORNER_PREFERENCE, &small as *const _ as _, size_of_val(&small) as u32);
+    // No system border: the CSS ring around the preview box is the frame.
+    let none = 0xFFFFFFFEu32; // DWMWA_COLOR_NONE
+    let _ = DwmSetWindowAttribute(f, DWMWA_BORDER_COLOR, &none as *const _ as _, 4);
+    FRAME.store(f.0 as isize, Ordering::Relaxed);
+}
+
 /// Live DWM thumbnails, by window id. One per preview box.
 static THUMBS: Mutex<Vec<(WinId, isize)>> = Mutex::new(Vec::new());
 
@@ -355,7 +389,13 @@ pub fn layout(card: Option<(f64, f64, f64, f64)>, rects: &[(WinId, f64, f64, f64
         *CARD.lock().unwrap() = win;
     }
 
+    let fr = frame();
+    let mut origin = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(dest, &mut origin);
+    }
     let mut out = Vec::new();
+    let mut shown = false;
     for &(id, x, y, w, h) in rects {
         let src = hwnd(id);
         if unsafe { IsIconic(src).as_bool() } {
@@ -364,7 +404,7 @@ pub fn layout(card: Option<(f64, f64, f64, f64)>, rects: &[(WinId, f64, f64, f64
         }
         let t = match thumbs.iter().find(|t| t.0 == id) {
             Some(t) => t.1,
-            None => match unsafe { DwmRegisterThumbnail(dest, src) } {
+            None => match unsafe { DwmRegisterThumbnail(fr, src) } {
                 Ok(t) => {
                     thumbs.push((id, t));
                     t
@@ -392,13 +432,23 @@ pub fn layout(card: Option<(f64, f64, f64, f64)>, rects: &[(WinId, f64, f64, f64
         let cx = sx + (sw - cw) / 2.0;
         let props = DWM_THUMBNAIL_PROPERTIES {
             dwFlags: DWM_TNP_RECTDESTINATION | DWM_TNP_RECTSOURCE | DWM_TNP_VISIBLE,
-            rcDestination: RECT { left: px(x), top: px(y), right: px(x + w), bottom: px(y + h) },
+            rcDestination: RECT { left: 0, top: 0, right: px(w), bottom: px(h) },
             rcSource: RECT { left: cx as i32, top: sy as i32, right: (cx + cw) as i32, bottom: (sy + ch) as i32 },
             fVisible: true.into(),
             ..Default::default()
         };
-        let _ = unsafe { DwmUpdateThumbnailProperties(t, &props) };
+        unsafe {
+            let _ = DwmUpdateThumbnailProperties(t, &props);
+            let flags = SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS;
+            let _ = SetWindowPos(fr, Some(HWND_TOPMOST), origin.left + px(x), origin.top + px(y), px(w), px(h), flags);
+        }
+        shown = true;
         out.push((id, sw / sh));
+    }
+    if !shown {
+        unsafe {
+            let _ = ShowWindowAsync(fr, SW_HIDE);
+        }
     }
     out
 }
@@ -447,7 +497,10 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         let kb = &*(lp.0 as *const KBDLLHOOKSTRUCT);
         let msg = wp.0 as u32;
         let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
-        if kb.flags.0 & LLKHF_INJECTED.0 == 0 {
+        // AltGr layouts send a fake Left Ctrl (scan code 0x21D) with Right Alt; it must not
+        // count as Ctrl (which selects the current window).
+        let altgr_ctrl = kb.vkCode == VK_LCONTROL.0 as u32 && kb.scanCode & 0x200 != 0;
+        if kb.flags.0 & LLKHF_INJECTED.0 == 0 && !altgr_ctrl {
             let key = translate(kb.vkCode);
             // Shift always passes through: a bare Shift is harmless to the app behind, and
             // swallowing it would hide it from GetAsyncKeyState (`|` detection).

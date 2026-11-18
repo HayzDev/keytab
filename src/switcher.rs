@@ -804,6 +804,7 @@ mod tests {
                 assert!(s.edit.as_ref().is_some_and(|edit| edit.scope == scope && edit.id == 1));
                 s.edit = None;
             }
+            super::on_key(Key::Ctrl, false); // the Windows hook keeps Ctrl state across close
             super::close(&mut super::STATE.lock().unwrap());
         }
     }
@@ -857,6 +858,7 @@ mod tests {
         s.typed = "fl".into();
         s.selected = None;
         assert_eq!(super::selected_hint(&s), Some(1), "a fully typed hint can still choose the active window");
+        s.ctrl_held = false;
         super::close(&mut s);
     }
 
@@ -889,6 +891,7 @@ mod tests {
         let mut s = super::STATE.lock().unwrap();
         let q = s.search.as_ref().unwrap();
         assert_eq!(s.wins[q.hits[q.sel].0].id, 2, "Ctrl must not select a window outside the results");
+        s.ctrl_held = false;
         super::close(&mut s);
     }
 
