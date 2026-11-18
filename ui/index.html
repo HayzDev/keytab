@@ -23,25 +23,24 @@
     --danger: #ff8a8a;
     --danger-bg: rgba(255, 110, 110, 0.2);
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --card: rgba(248, 248, 251, 0.9);
-      --line: rgba(0, 0, 0, 0.07);
-      --edge: rgba(0, 0, 0, 0.14);
-      --text: #17171c;
-      --muted: #55555f;
-      --faint: #6e6e79;
-      --key-bg: rgba(0, 0, 0, 0.07);
-      --accent: #2f6bff;
-      --on-accent: #ffffff;
-      --sel: rgba(47, 107, 255, 0.16);
-      --custom: #c98a00;
-      --field: rgba(0, 0, 0, 0.04);
-      --well: rgba(0, 0, 0, 0.06);
-      --on-custom: #17171c;
-      --danger: #c62828;
-      --danger-bg: rgba(220, 50, 50, 0.13);
-    }
+  /* Light colors: the system's, unless the Theme setting says otherwise (applyTheme). */
+  :root[data-scheme=light] {
+    --card: rgba(248, 248, 251, 0.9);
+    --line: rgba(0, 0, 0, 0.07);
+    --edge: rgba(0, 0, 0, 0.14);
+    --text: #17171c;
+    --muted: #55555f;
+    --faint: #6e6e79;
+    --key-bg: rgba(0, 0, 0, 0.07);
+    --accent: #2f6bff;
+    --on-accent: #ffffff;
+    --sel: rgba(47, 107, 255, 0.16);
+    --custom: #c98a00;
+    --field: rgba(0, 0, 0, 0.04);
+    --well: rgba(0, 0, 0, 0.06);
+    --on-custom: #17171c;
+    --danger: #c62828;
+    --danger-bg: rgba(220, 50, 50, 0.13);
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; background: transparent; overflow: hidden; user-select: none; }
@@ -75,13 +74,24 @@
   #list { max-height: 620px; overflow-y: auto; scrollbar-width: none; padding: 6px; display: flex; flex-direction: column; gap: 1px; }
   #list:empty { display: none; }
   .empty { padding: 18px 12px; color: var(--muted); text-align: center; }
-  /* Keyboard-first: no hover state, so the selection is the only highlighted row. */
+  /* With "hover selects" on (the default), hovering moves the selection, so the selection
+     stays the only highlighted row. Off, hovered rows get a faint wash instead. */
   .row {
-    display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px;
+    position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px;
     padding: 6px 10px; border: 0; border-radius: 6px; background: none;
     color: inherit; font: inherit; text-align: left; cursor: default;
   }
+  .no-hover-select .row:hover:not(.sel) { background: var(--field); }
   .row.sel { background: var(--sel); }
+  /* Row buttons (set hint, close) appear on the row under the mouse. */
+  .acts { display: none; flex: none; gap: 2px; margin-right: -4px; }
+  .row:hover .acts, .row.closing .acts { display: flex; }
+  .acts button {
+    display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px;
+    background: none; color: var(--muted); cursor: pointer;
+  }
+  .acts button:hover { background: var(--key-bg); color: var(--text); }
+  .acts button.x:hover, .row.closing .acts button.x { background: var(--danger); color: var(--on-accent); }
 
   /* The hint chip is the thing you act on, so it carries the most contrast. */
   kbd {
@@ -135,15 +145,37 @@
     display: grid; place-items: center; overflow: hidden;
   }
   #preview[hidden] { display: none; }
+  #preview { cursor: pointer; }
   #preview .icon, #preview .mono { width: 40px; height: 40px; font-size: 20px; }
 
   /* Key legend: the same component in every mode. */
-  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
-  .keys kbd { width: auto; min-width: 1.7em; padding: 1px 5px; margin-right: 4px; font-size: 12px; color: var(--text); border-radius: 5px; background: linear-gradient(rgba(255,255,255,.045), transparent), rgba(255,255,255,.07); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+  /* Two groups: navigation (left) and actions on the selected window (right). When both
+     don't fit on one line, the actions wrap to a line of their own, left-aligned like the
+     first, instead of one row of loose items splitting across both ends. */
+  .keys { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .keys .main, .keys .aux { display: flex; flex-wrap: wrap; align-items: center; }
+  /* Fixed height so icon keys (keys.js) and text keys line up. */
+  .keys kbd { display: inline-flex; align-items: center; justify-content: center; gap: 1px; height: 20px; vertical-align: middle; text-transform: none; width: auto; min-width: 1.7em; padding: 0 5px; margin-right: 4px; font-size: 12px; color: var(--text); border-radius: 5px; background: linear-gradient(rgba(255,255,255,.045), transparent), rgba(255,255,255,.07); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+  .keys kbd .ki { display: block; flex: none; }
+  .keys kbd .ks { font-size: 11.5px; }
+  /* Keycaps inside a sentence (the hint dialog's note). */
+  /* Centered on the capitals of the sentence ("middle" alone sits 1px low). */
+  .keys.inline { display: inline-flex; vertical-align: middle; position: relative; top: -1px; gap: 0; }
+  .keys.inline kbd { margin-right: 0; }
+  .keys.inline kbd + kbd { margin-left: 3px; }
   .keys .or { margin: 0 5px 0 0; }
-  .keys .plus { margin: 0 3px 0 -2px; }
-  .keys .aux { margin-left: auto; display: flex; gap: inherit; }
-  #foot { padding: 8px 16px 9px; border-top: 1px solid var(--line); }
+  /* Keys pressed together are adjacent chips, a hair apart (Raycast-style, no "+"). */
+  .keys kbd + kbd { margin-left: -1px; }
+  /* Every footer key is also a button that does what pressing it does. Its hover background
+     has room around the chips and label, like Raycast's footer actions.
+     The negative vertical margin keeps the footer's height; items sit 1px apart, so the
+     padding is the space between them. */
+  .keys [data-act] { cursor: pointer; display: inline-flex; align-items: center; border-radius: 7px; padding: 3px 7px 3px 3px; margin: -3px 0; }
+  .keys .main, .keys .aux { gap: 6px 1px; }
+  .keys [data-act]:hover { background: var(--field); color: var(--text); }
+  .keys .gear { display: grid; place-items: center; width: 26px; height: 24px; padding: 0; margin: -3px -4px -3px 3px; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; }
+  .keys .gear:hover { background: var(--field); color: var(--text); }
+  #foot { padding: 8px 13px 9px; border-top: 1px solid var(--line); }
   .editing #list, .editing #search { display: none; }
 
   /* The dialog sits on the same left edge as the rows. */
@@ -193,15 +225,18 @@
   </div>
   <div id="foot" class="keys"></div>
 </div>
+<script src="keys.js"></script>
 <script>
   const { listen } = window.__TAURI__.event;
   const { invoke } = window.__TAURI__.core;
   const $ = id => document.getElementById(id);
   const el = (tag, cls, text) => Object.assign(document.createElement(tag), { className: cls, textContent: text ?? '' });
   // One chip per key: "Ctrl+P" means press together, "E or 3" means either key.
-  const caps = k => k.split(/(\+| or )/).map(t => t === '+' ? '<span class="plus">+</span>'
-    : t === ' or ' ? '<span class="or">or</span>' : `<kbd>${({ Esc: '⎋', Ctrl: '⌃', Del: '⌦', Backspace: '⌫', '\\': '⧵' })[t] ?? t}</kbd>`).join('');
-  const keys = (...pairs) => pairs.map(([k, what]) => `<span>${caps(k)}${what}</span>`).join('');
+  const caps = k => k.split(/(\+| or )/).map(t => t === '+' ? ''
+    : t === ' or ' ? '<span class="or">or</span>' : `<kbd>${keycap(t)}</kbd>`).join('');
+  // [key, label, action]: with an action the item is a button (switcher::press).
+  const keys = (...pairs) => pairs.map(([k, what, act]) =>
+    `<span${act ? ` data-act="${act}" title="Click or press ${esc(k)}"` : ''}>${caps(k)}${what}</span>`).join('');
 
   // Wrap matched char positions [offset, offset+len) of `text` in <span class=m>.
   function highlight(span, text, hits, offset) {
@@ -252,9 +287,10 @@
       ...(!app && title ? [el('span', 'title', title)] : []));
     const same = wins.filter(x => x.app === edit.app).length;
     // On a clash the conflict is the only message: the note describes a save that can't happen.
-    $('e-note').textContent = edit.error ? '' : app && same > 1 && edit.keys
-      ? `${same === 2 ? 'Both' : `All ${same}`} ${edit.app} windows → ${Array.from({ length: same }, (_, i) => edit.keys.toUpperCase() + (i + 1)).join(', ')}`
-      : app ? `Also applies to ${edit.app} windows opened later` : 'Press ⇧\\ instead to set it for every window of the app';
+    $('e-note').innerHTML = edit.error ? '' : app && same > 1 && edit.keys
+      ? esc(`${same === 2 ? 'Both' : `All ${same}`} ${edit.app} windows → ${Array.from({ length: same }, (_, i) => edit.keys.toUpperCase() + (i + 1)).join(', ')}`)
+      : app ? esc(`Also applies to ${edit.app} windows opened later`)
+      : `Press <span class="keys inline"><kbd>${keycap('⇧')}</kbd><kbd>${keycap('\\')}</kbd></span> instead to set it for every window of the app`;
     const chars = [...edit.keys];
     $('slots').replaceChildren(...Array.from({ length: Math.min(MAX_HINT, Math.max(2, chars.length + 1)) }, (_, i) =>
       el('span', i < chars.length ? 'on' : i === chars.length ? 'next' : 'empty', chars[i])));
@@ -267,25 +303,33 @@
   // The footer follows the state with one order everywhere: what to type, ↵ open, ⌫ back,
   // preview, mode switch; on the right, actions on the selected window, then Esc.
   function renderFoot(search, preview, edit, rows, typed, pinned, closing) {
-    if (edit) return $('foot').innerHTML = keys(edit.error ? ['⌫', 'change'] : ['↵', 'save'],
+    if (edit) return $('foot').innerHTML = keys(edit.error ? ['⌫', 'change', 'Back'] : ['↵', 'save', 'Enter'],
       // Del only does something when this scope has a hint you set.
-      ...(edit.kind === (edit.scope === 'app' ? 'app' : 'window') ? [['Del', 'reset to automatic']] : []), ['Esc', 'back']);
+      ...(edit.kind === (edit.scope === 'app' ? 'app' : 'window') ? [['Del', 'reset to automatic', 'Delete']] : []), ['Esc', 'back', 'Esc']);
     if (closing) {
       const w = rows.find(w => w.id === closing);
       return $('foot').innerHTML = `<span class="warn">Close ${esc(w?.app ?? 'this')} window?</span>`
-        + keys(['Del', 'close window'], ['Esc', 'cancel']);
+        + keys(['Del', 'close window', 'Delete'], ['Esc', 'cancel', 'Esc']);
     }
-    const pin = ['Ctrl+P', pinned ? 'preview off' : 'keep preview'];
+    // Clicking L⇧ pins the preview: a click can't hold Shift.
+    const pin = ['Ctrl+P', pinned ? 'preview off' : 'keep preview', 'pin'];
     // Holding Shift adds to the mode's footer rather than replacing it: the preview is already
     // up, so L⇧ becomes Ctrl+P. Typing a prefix is a short step: finish it, open, or back out.
     // With Shift down, / types "?", so only R⇧ switches.
-    const mode = search ? ['R⇧', 'back to hints'] : ['R⇧', 'search'];
-    const left = typed ? [['⌫', 'back'], preview || pinned ? pin : ['L⇧', 'preview']]
-      : [preview || pinned ? pin : ['L⇧', 'preview'], mode];
-    const aux = (preview || typed ? [] : [['\\', 'set hint'], ['Del', 'close window']]).concat([['Esc', 'dismiss']]);
-    $('foot').innerHTML = keys(['↵', 'open'], ['Ctrl', 'current window'], ...left) + `<span class="aux">${keys(...aux)}</span>`;
+    const mode = search ? ['R⇧', 'back to hints', 'search'] : ['R⇧', 'search', 'search'];
+    const left = typed ? [['⌫', 'back', 'Back'], preview || pinned ? pin : ['L⇧', 'preview', 'pin']]
+      : [preview || pinned ? pin : ['L⇧', 'preview', 'pin'], mode];
+    const aux = (preview || typed ? [] : [['\\', 'set hint', 'HintWindow'], ['Alt+H', 'hide', 'hide'], ['Del', 'close window', 'Delete']])
+      .concat([['Esc', 'dismiss', 'Esc']]);
+    $('foot').innerHTML = `<span class="main">${keys(['↵', 'open', 'Enter'], ['Ctrl', 'current window', 'current'], ...left)}</span>`
+      + `<span class="aux">${keys(...aux)}<button class="gear" data-act="settings" title="Settings">${GEAR}</button></span>`;
   }
   const esc = t => t.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+  const svg = d => `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const GEAR = svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>');
+  const TAG = svg('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>');
+  const CROSS = svg('<path d="M18 6 6 18M6 6l12 12"/>');
+  const EYE_OFF = svg('<path d="M10.7 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.2 3.1M6.6 6.6A16.6 16.6 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m2 2 20 20"/>');
 
   // Where there's no global keyboard hook (Wayland), the overlay has focus and forwards
   // keys to the Rust state machine. On Windows the hook swallows them before we'd see them.
@@ -331,6 +375,7 @@
 
   listen('view', ({ payload: { rows, typed, search, edit, dom_input, selected, preview, pinned, closing } }) => {
     domInput = dom_input;
+    current = selected;
     preview = preview && !edit;
     renderEdit(edit, rows);
     $('card').hidden = rows.length === 0 && !search;
@@ -344,11 +389,14 @@
     // Non-matching hints are hidden in every mode.
     const shown = search ? rows : rows.filter(w => w.key.startsWith(typed));
     $('list').replaceChildren(...shown.map(w => {
-      const row = el('button', 'row');
+      const row = el('div', 'row');
+      row.dataset.id = w.id;
       row.classList.toggle('sel', w.id === selected);
       row.classList.toggle('closing', w.id === closing);
       row.onclick = e => { e.stopPropagation(); invoke('activate', { id: w.id }); };
-
+      // Middle click closes the window, like a taskbar thumbnail or a browser tab.
+      row.onmousedown = e => { if (e.button === 1) e.preventDefault(); };
+      row.onauxclick = e => { if (e.button === 1) { e.stopPropagation(); invoke('close_window', { id: w.id }); } };
 
       // Hit indices are char positions in "app title" (or just "app" when title == app).
       const hits = new Set(w.hits);
@@ -356,7 +404,16 @@
       text.append(highlight(el('span', 'app'), w.app, hits, 0));
       const title = cleanTitle(w.title, w.app);
       if (title) text.append(highlight(el('span', 'title'), title, hits, [...w.app].length + 1));
-      row.append(chip(w, typed), icon(w), text);
+      // Row buttons, shown on hover: set a hint, hide (Shift+click: for the app), close.
+      const acts = el('span', 'acts');
+      const hint = Object.assign(el('button'), { innerHTML: TAG, title: `Set a hint for this window (Shift+click: every ${w.app} window)` });
+      hint.onclick = e => { e.stopPropagation(); invoke('edit_hint', { id: w.id, app: e.shiftKey }); };
+      const hideBtn = Object.assign(el('button'), { innerHTML: EYE_OFF, title: `Hide this window from keytab (Shift+click: every ${w.app} window). Undo in Settings › Switcher.` });
+      hideBtn.onclick = e => { e.stopPropagation(); invoke('hide_window', { id: w.id, app: e.shiftKey }); };
+      const x = Object.assign(el('button', 'x'), { innerHTML: CROSS, title: w.id === closing ? 'Click again to close' : 'Close window' });
+      x.onclick = e => { e.stopPropagation(); invoke('close_window', { id: w.id }); };
+      acts.append(hint, hideBtn, x);
+      row.append(chip(w, typed), icon(w), text, acts);
       return row;
     }));
 
@@ -373,6 +430,41 @@
     $('list').querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
     sendLayout();
   }).then(() => invoke('ready'));
+
+  // ---- mouse ----
+  // Hover selects the row under the pointer, but only when the pointer really moves:
+  // re-renders and scrolling fire mousemove under a still pointer, and that mustn't take the
+  // selection away from the keyboard.
+  let current = null, lastPointer = '';
+  $('list').addEventListener('mousemove', e => {
+    const at = `${e.screenX},${e.screenY}`;
+    if (at === lastPointer) return;
+    lastPointer = at;
+    const row = e.target.closest('.row');
+    if (!prefs.hover_select || !row || +row.dataset.id === current) return;
+    current = +row.dataset.id;
+    invoke('select', { id: current });
+  });
+  $('foot').onclick = e => {
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'settings') invoke('open_settings');
+    else if (act) invoke('press', { name: act });
+  };
+  $('preview').onclick = () => invoke('activate', { id: +$('preview').dataset.id });
+  // No browser menu (Reload, Inspect…) on right click.
+  addEventListener('contextmenu', e => e.preventDefault());
+
+  // Settings (settings.html) that change how this page looks or behaves.
+  let prefs = { theme: 'system', hover_select: true };
+  const light = matchMedia('(prefers-color-scheme: light)');
+  function applyPrefs() {
+    document.documentElement.dataset.scheme = prefs.theme === 'system' ? (light.matches ? 'light' : 'dark') : prefs.theme;
+    document.body.classList.toggle('no-hover-select', !prefs.hover_select);
+  }
+  light.onchange = applyPrefs;
+  applyPrefs();
+  invoke('get_settings').then(v => { prefs = v.settings; applyPrefs(); }).catch(() => {});
+  listen('settings', ({ payload }) => { prefs = payload; applyPrefs(); });
 
   // Clicking around the card dismisses (Linux; on Windows the window is the card, and the
   // mouse hook closes it on clicks elsewhere).

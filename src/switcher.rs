@@ -167,6 +167,7 @@ static OVERLAY: OnceLock<platform::Overlay> = OnceLock::new();
 pub fn init(app: AppHandle, overlay: platform::Overlay) {
     let mut state = STATE.lock().unwrap();
     state.app_hints = load_app_hints();
+    state.previews_pinned = crate::settings::get().previews_on;
     #[cfg(target_os = "linux")]
     if let Some(session) = platform::window_hint_session() {
         state.custom = crate::window_hints::load(&hints_path().with_file_name("window-hints.json"), session).unwrap_or_else(|e| {
@@ -182,14 +183,92 @@ pub fn init(app: AppHandle, overlay: platform::Overlay) {
 
 // ---- saved app hints -------------------------------------------------------------
 
-/// %APPDATA%\keytab on Windows, $XDG_CONFIG_HOME/keytab or ~/.config/keytab elsewhere.
 fn hints_path() -> PathBuf {
-    let env = |k| std::env::var_os(k).map(PathBuf::from);
-    let base = env("APPDATA")
-        .or_else(|| env("XDG_CONFIG_HOME"))
-        .or_else(|| env("HOME").map(|h| h.join(".config")))
-        .unwrap_or_default();
-    base.join("keytab").join("app-hints.json")
+    crate::settings::config_dir().join("app-hints.json")
+}
+
+/// One app on the settings window's Hints page.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct HintApp {
+    /// Lowercase app name: the key in app-hints.json.
+    pub app: String,
+    /// As shown in the switcher ("Vivaldi"); the key itself when the app isn't running.
+    pub name: String,
+    /// The saved hint, or the automatic one the app's most recent window has right now.
+    pub hint: String,
+    pub saved: bool,
+    /// Open windows of the app.
+    pub windows: usize,
+    /// One of its windows, for the app icon (`http://icon.localhost/<id>`).
+    pub icon: Option<WinId>,
+}
+
+/// Saved app hints, then every other open app with its current automatic hint. `open` is the
+/// current window list (platform::list), most recent first.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn hint_apps(mut open: Vec<Win>) -> Vec<HintApp> {
+    let s = STATE.lock().unwrap();
+    keys::assign(&mut open, &s.custom, &s.app_hints);
+    let mut out: Vec<HintApp> = s.app_hints.iter().map(|(app, hint)| {
+        let wins: Vec<&Win> = open.iter().filter(|w| w.app.to_lowercase() == *app).collect();
+        HintApp { app: app.clone(), name: wins.first().map_or(app.clone(), |w| w.app.clone()), hint: hint.clone(), saved: true, windows: wins.len(), icon: wins.first().map(|w| w.id) }
+    }).collect();
+    for w in &open {
+        let app = w.app.to_lowercase();
+        if out.iter().any(|h| h.app == app) { continue; }
+        let windows = open.iter().filter(|x| x.app.to_lowercase() == app).count();
+        out.push(HintApp { app, name: w.app.clone(), hint: w.key.clone(), saved: false, windows, icon: Some(w.id) });
+    }
+    out
+}
+
+/// Why `hint` can't be saved for `app`, if it can't: not 1-4 letters/digits, or not
+/// prefix-free against the other hints you set (the same rule as the hint dialog).
+pub fn check_app_hint(app: &str, hint: &str) -> Option<String> {
+    let hint = hint.to_lowercase();
+    if hint.is_empty() || hint.len() > MAX_HINT || !hint.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
+        return Some(format!("Use 1 to {MAX_HINT} letters or digits"));
+    }
+    if app.trim().is_empty() {
+        return Some("Choose an app".into());
+    }
+    let s = STATE.lock().unwrap();
+    let e = Edit { scope: Scope::App, id: 0, app: app.trim().into(), title: String::new(), current: String::new(), kind: Kind::Auto, keys: hint, error: None };
+    clash(&s.wins, &s.custom, &s.app_hints, &e)
+}
+
+/// Save (or change) an app hint from the settings window.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn set_app_hint(app: &str, hint: &str) -> Result<(), String> {
+    if let Some(e) = check_app_hint(app, hint) { return Err(e); }
+    let mut guard = STATE.lock().unwrap();
+    let s = &mut *guard;
+    s.app_hints.insert(app.trim().to_lowercase(), hint.to_lowercase());
+    save_app_hints(&s.app_hints);
+    if s.open {
+        keys::assign(&mut s.wins, &s.custom, &s.app_hints);
+        emit(s);
+    }
+    Ok(())
+}
+
+/// Forget saved app hints (settings window): one app, or all of them with `None`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn remove_app_hint(app: Option<&str>) {
+    let mut guard = STATE.lock().unwrap();
+    let s = &mut *guard;
+    let before = s.app_hints.len();
+    match app {
+        Some(app) => { s.app_hints.remove(app); }
+        None => s.app_hints.clear(),
+    }
+    if s.app_hints.len() != before {
+        save_app_hints(&s.app_hints);
+        if s.open {
+            keys::assign(&mut s.wins, &s.custom, &s.app_hints);
+            emit(s);
+        }
+    }
 }
 
 fn load_app_hints() -> BTreeMap<String, String> {
@@ -261,10 +340,10 @@ fn emit(s: &State) {
         ),
         None => (ordered_hints(s).into_iter().filter(|w| !s.preview_held || w.key.starts_with(&s.typed)).map(|w| Row { win: w, hits: &[] }).collect(), None),
     };
-    let selected = s.search.as_ref().map_or_else(|| selected_hint(s), |q| q.hits.get(q.sel).map(|(i, _)| s.wins[*i].id));
+    let selected = selection(s);
     let view = View { rows, typed: &s.typed, search, edit: s.edit.as_ref(), dom_input: !platform::GLOBAL_INPUT, preview: s.preview_held, pinned: s.previews_pinned, selected, closing: s.closing };
     #[cfg(windows)]
-    let _ = _app.emit("view", view);
+    let _ = _app.emit_to("main", "view", view);
     #[cfg(target_os = "linux")]
     platform::render(&view);
 }
@@ -279,10 +358,11 @@ pub fn refresh() {
 pub fn set_query(query: String) {
     let mut s = STATE.lock().unwrap();
     let hits = rank(&s.wins, &query);
+    let lead = leads(&s.wins, s.active);
     let Some(search) = s.search.as_mut() else { return };
     search.query = query;
     search.hits = hits;
-    search.sel = first_sel(&search.query, search.hits.len());
+    search.sel = first_sel(&search.query, search.hits.len(), lead);
     s.closing = None;
     if s.ctrl_held { select_active(&mut s); }
     emit(&s);
@@ -322,19 +402,21 @@ fn rank(wins: &[Win], query: &str) -> Vec<(usize, Vec<usize>)> {
 
 fn open(s: &mut State) {
     #[cfg(windows)]
-    {
-    s.custom.retain(|&id, _| platform::alive(id));
-    s.wins = platform::list();
-    }
+    let wins = {
+        s.custom.retain(|&id, _| platform::alive(id));
+        platform::list()
+    };
     #[cfg(target_os = "linux")]
-    {
+    let wins = {
         let Some(wins) = platform::list() else { return };
         let previous = s.custom.len();
         s.custom.retain(|id, _| wins.iter().any(|w| w.id == *id));
-        s.wins = wins;
         if s.custom.len() != previous { persist_window_hints(&s.custom); }
-    }
-    s.active = s.wins.first().map(|w| w.id);
+        wins
+    };
+    // Before hiding: a hidden active window is still the one to switch away from.
+    s.active = wins.first().map(|w| w.id);
+    s.wins = without_hidden(wins);
     keys::assign(&mut s.wins, &s.custom, &s.app_hints);
     s.typed.clear();
     s.selected = None;
@@ -349,9 +431,14 @@ fn open(s: &mut State) {
 }
 
 /// An empty query lists every window in recency order, so start on the previous one like
-/// hint mode does (selected_hint); a real query starts on its best match.
-fn first_sel(query: &str, hits: usize) -> usize {
-    usize::from(query.is_empty() && hits > 1)
+/// hint mode does (selected_hint); a real query starts on its best match. `lead`: the first
+/// row is the active window (it isn't when that window is hidden).
+fn first_sel(query: &str, hits: usize, lead: bool) -> usize {
+    usize::from(lead && query.is_empty() && hits > 1)
+}
+
+fn leads(wins: &[Win], active: Option<WinId>) -> bool {
+    active.is_none_or(|a| wins.first().is_some_and(|w| w.id == a))
 }
 
 fn open_search(s: &mut State) {
@@ -360,7 +447,7 @@ fn open_search(s: &mut State) {
         if !s.open { return; }
     }
     let hits = rank(&s.wins, "");
-    s.search = Some(Search { query: String::new(), sel: first_sel("", hits.len()), hits });
+    s.search = Some(Search { query: String::new(), sel: first_sel("", hits.len(), leads(&s.wins, s.active)), hits });
     if s.ctrl_held { select_active(s); }
     emit(s);
 }
@@ -407,6 +494,167 @@ pub fn hide() {
 }
 pub fn activate(id: WinId) {
     switch_to(&mut STATE.lock().unwrap(), id);
+}
+
+/// Is the switcher showing (the auto-updater waits until it isn't).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn is_open() -> bool {
+    STATE.lock().unwrap().open
+}
+
+/// The "previews on by default" setting changed: apply it now, like Ctrl+P.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn set_previews_pinned(on: bool) {
+    let mut s = STATE.lock().unwrap();
+    s.previews_pinned = on;
+    if s.open { emit(&s); }
+}
+
+// ---- mouse -----------------------------------------------------------------------
+
+/// Hover: select this row (and preview it) without opening it.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn select(id: WinId) {
+    let mut s = STATE.lock().unwrap();
+    if !s.open || s.edit.is_some() { return; }
+    if select_row(&mut s, id) {
+        if s.closing.is_some_and(|c| c != id) { s.closing = None; }
+        emit(&s);
+    }
+}
+
+/// Select a visible row by window id, in either mode. True if the selection changed.
+fn select_row(s: &mut State, id: WinId) -> bool {
+    let before = (s.selected, s.search.as_ref().map(|q| q.sel));
+    if let Some(i) = s.search.as_ref().and_then(|q| q.hits.iter().position(|(i, _)| s.wins[*i].id == id)) {
+        s.search.as_mut().unwrap().sel = i;
+    } else if s.search.is_none() && s.wins.iter().any(|w| w.id == id && w.key.starts_with(&s.typed)) {
+        s.selected = Some(id);
+    }
+    before != (s.selected, s.search.as_ref().map(|q| q.sel))
+}
+
+/// A row's close button or a middle click. With confirmation on, the first click arms the
+/// row (it turns red, like Del) and a second click closes it.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn close_window(id: WinId) {
+    let mut s = STATE.lock().unwrap();
+    if !s.open || s.edit.is_some() || !s.wins.iter().any(|w| w.id == id) { return; }
+    if crate::settings::get().confirm_close && s.closing != Some(id) {
+        // Selected too, so the footer's Del confirms this same window.
+        select_row(&mut s, id);
+        s.closing = Some(id);
+        emit(&s);
+        return;
+    }
+    s.closing = None;
+    remove_window(&mut s, id);
+}
+
+/// Close a window and drop it from the list, keeping the mode (hints or search).
+fn remove_window(s: &mut State, id: WinId) {
+    platform::close(id);
+    drop_rows(s, |w| w.id == id);
+}
+
+/// Take windows off the list (closed or hidden), keeping the mode (hints or search).
+fn drop_rows(s: &mut State, gone: impl Fn(&Win) -> bool) {
+    s.wins.retain(|w| !gone(w));
+    s.typed.clear();
+    s.selected = None;
+    if s.wins.is_empty() { return close(s); }
+    let lead = leads(&s.wins, s.active);
+    if let Some(q) = s.search.as_mut() {
+        q.hits = rank(&s.wins, &q.query);
+        q.sel = first_sel(&q.query, q.hits.len(), lead).min(q.hits.len().saturating_sub(1));
+    }
+    emit(s);
+}
+
+// ---- hidden windows --------------------------------------------------------------
+
+/// Windows the user hid (settings `hidden`) never reach the switcher.
+pub fn without_hidden(mut wins: Vec<Win>) -> Vec<Win> {
+    let hidden = crate::settings::get().hidden;
+    if !hidden.is_empty() {
+        wins.retain(|w| !hidden.iter().any(|h| h.matches(&w.app, &w.title)));
+    }
+    wins
+}
+
+/// A row's hide button (Shift+click: `app`): keep this window, or every window of its app,
+/// out of the switcher from now on. Settings > Switcher lists them to bring them back.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn hide_window(id: WinId, app: bool) {
+    let mut s = STATE.lock().unwrap();
+    if !s.open || s.edit.is_some() { return; }
+    hide_in(&mut s, id, app);
+}
+
+fn hide_in(s: &mut State, id: WinId, app: bool) {
+    let Some(w) = s.wins.iter().find(|w| w.id == id) else { return };
+    let rule = crate::settings::Hidden { app: w.app.clone(), title: (!app).then(|| w.title.clone()) };
+    let mut settings = crate::settings::get();
+    if !settings.hidden.contains(&rule) {
+        settings.hidden.push(rule.clone());
+        crate::settings::set(settings.clone());
+        // The settings window, if open, lists the new entry.
+        #[cfg(windows)]
+        if let Some(app) = APP.get() { let _ = app.emit("settings", settings); }
+    }
+    s.closing = None;
+    drop_rows(s, |w| rule.matches(&w.app, &w.title));
+}
+
+/// A row's hint button: the hint dialog for that window (or, `app`, for its app).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn edit_hint(id: WinId, app: bool) {
+    let mut s = STATE.lock().unwrap();
+    if !s.open { return; }
+    let Some(i) = s.wins.iter().position(|w| w.id == id) else { return };
+    s.closing = None;
+    start_edit(&mut s, i, if app { Scope::App } else { Scope::Window });
+    emit(&s);
+}
+
+/// A click on a footer key: does what pressing that key does.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn press(name: &str) {
+    let key = match name {
+        "Enter" => Key::Enter,
+        "Esc" => Key::Esc,
+        "Back" => Key::Back,
+        "Delete" => Key::Delete,
+        "HintWindow" => Key::HintWindow,
+        "HintApp" => Key::HintApp,
+        "Up" => Key::Up,
+        "Down" => Key::Down,
+        "hide" => {
+            let mut s = STATE.lock().unwrap();
+            if !s.open || s.edit.is_some() { return; }
+            if let Some(id) = selection(&s) { hide_in(&mut s, id, false); }
+            return;
+        }
+        "pin" | "search" | "current" => {
+            let mut s = STATE.lock().unwrap();
+            if !s.open || s.edit.is_some() { return; }
+            s.closing = None;
+            match name {
+                "pin" => s.previews_pinned = !s.previews_pinned,
+                "current" => select_active(&mut s),
+                _ if s.search.is_some() => {
+                    s.search = None;
+                    s.typed.clear();
+                    s.selected = None;
+                }
+                _ => return open_search(&mut s),
+            }
+            return emit(&s);
+        }
+        _ => return,
+    };
+    on_key(key, true);
+    on_key(key, false);
 }
 
 // ---- keys ------------------------------------------------------------------------
@@ -495,6 +743,12 @@ pub fn on_key(key: Key, down: bool) -> bool {
         emit(&s);
         if key == Key::Esc { return true; }
     }
+    // Alt+H: hide the selected window from the switcher (Settings > Switcher undoes it).
+    // Not Ctrl: pressing Ctrl moves the selection to the current window.
+    if key == Key::Char('h') && s.alt_held && s.edit.is_none() {
+        if let Some(id) = selection(&s) { hide_in(&mut s, id, false); }
+        return true;
+    }
     let key = match key {
         Key::ShiftDigit(c) if s.preview_held && s.search.is_none() => Key::Char(c),
         Key::ShiftDigit(_) => Key::Other,
@@ -527,16 +781,12 @@ pub fn on_key(key: Key, down: bool) -> bool {
         }
         Key::Delete => {
             if let Some(id) = selected_hint(&s) {
-                if armed != Some(id) {
+                if armed != Some(id) && crate::settings::get().confirm_close {
                     s.closing = Some(id);
                     emit(&s);
                     return true;
                 }
-                platform::close(id);
-                s.wins.retain(|w| w.id != id);
-                s.typed.clear();
-                s.selected = None;
-                if s.wins.is_empty() { close(&mut s) } else { emit(&s) }
+                remove_window(&mut s, id);
             }
         }
         Key::Char(c) if c.is_ascii_alphanumeric() => {
@@ -577,13 +827,19 @@ fn ordered_hints(s: &State) -> Vec<&Win> {
     wins
 }
 
+/// The selected window in either mode.
+fn selection(s: &State) -> Option<WinId> {
+    s.search.as_ref().map_or_else(|| selected_hint(s), |q| q.hits.get(q.sel).map(|(i, _)| s.wins[*i].id))
+}
+
 fn selected_hint(s: &State) -> Option<WinId> {
     let matches: Vec<WinId> = ordered_hints(s).into_iter().filter(|w| w.key.starts_with(&s.typed)).map(|w| w.id).collect();
     if let Some(id) = s.selected.filter(|id| matches.contains(id)) {
         return Some(id);
     }
-    // Nothing typed: the previous window, like Alt-Tab (the first row is the current one).
-    matches.get(if s.typed.is_empty() { 1 } else { 0 }).or(matches.first()).copied()
+    // Nothing typed: the previous window, like Alt-Tab (the first row is the current one,
+    // unless it's hidden).
+    matches.get(usize::from(s.typed.is_empty() && leads(&s.wins, s.active))).or(matches.first()).copied()
 }
 
 fn select_active(s: &mut State) {
@@ -630,7 +886,7 @@ fn on_search_key(s: &mut State, key: Key, armed: Option<WinId>) -> bool {
         }
         Key::Delete => {
             let Some(&(i, _)) = q.hits.get(q.sel) else { return true };
-            if armed != Some(s.wins[i].id) {
+            if armed != Some(s.wins[i].id) && crate::settings::get().confirm_close {
                 s.closing = Some(s.wins[i].id);
                 emit(s);
                 return true;
@@ -639,7 +895,7 @@ fn on_search_key(s: &mut State, key: Key, armed: Option<WinId>) -> bool {
             s.wins.remove(i);
             q.query.clear();
             q.hits = rank(&s.wins, "");
-            q.sel = first_sel("", q.hits.len());
+            q.sel = first_sel("", q.hits.len(), leads(&s.wins, s.active));
         }
         k if k.hint_scope().is_some() => {
             if let Some(&(i, _)) = q.hits.get(q.sel) {
@@ -651,7 +907,7 @@ fn on_search_key(s: &mut State, key: Key, armed: Option<WinId>) -> bool {
         Key::Back => {
             q.query.pop();
             q.hits = rank(&s.wins, &q.query);
-            q.sel = first_sel(&q.query, q.hits.len());
+            q.sel = first_sel(&q.query, q.hits.len(), leads(&s.wins, s.active));
         }
         Key::Char(c) => {
             q.query.push(c);
@@ -1048,6 +1304,91 @@ mod tests {
         assert!(s.open && s.search.is_none(), "pressing it again goes back to hints");
         assert!(!s.preview_held);
         super::close(&mut s);
+    }
+
+    #[test]
+    fn hints_page_lists_saved_then_open_apps_and_checks_new_hints() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        let saved = std::mem::replace(&mut s.app_hints, [("vivaldi".to_string(), "b".to_string()), ("slack".to_string(), "sl".to_string())].into());
+        drop(s);
+        let open = vec![Win::new(1, "Vivaldi".into(), "a".into()), Win::new(2, "Code".into(), "b".into()), Win::new(3, "Vivaldi".into(), "c".into())];
+        let apps = super::hint_apps(open);
+        let row = |app: &str| apps.iter().find(|a| a.app == app).unwrap();
+        assert!(row("vivaldi").saved && row("vivaldi").windows == 2 && row("vivaldi").name == "Vivaldi");
+        assert!(row("slack").saved && row("slack").windows == 0 && row("slack").icon.is_none(), "saved but not running");
+        assert!(!row("code").saved && !row("code").hint.is_empty(), "open apps show their automatic hint");
+        assert_eq!(apps.iter().filter(|a| a.saved).count(), 2);
+        assert!(super::check_app_hint("Code", "ba").is_some(), "B (Vivaldi) rules out BA");
+        assert!(super::check_app_hint("Code", "s").is_some(), "S would be a prefix of SL");
+        assert!(super::check_app_hint("Code", "co!").is_some(), "letters and digits only");
+        assert!(super::check_app_hint("Code", "co").is_none());
+        assert!(super::check_app_hint("Vivaldi", "bv").is_none(), "an app's own hint doesn't block changing it");
+        super::STATE.lock().unwrap().app_hints = saved;
+    }
+
+    #[test]
+    fn mouse_hover_selects_and_close_button_needs_two_clicks() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(2, "Paint".into(), "Art".into()), Win::new(3, "Mail".into(), "Inbox".into())];
+        for (win, hint) in s.wins.iter_mut().zip(["c", "p", "m"]) { win.key = hint.into(); }
+        drop(s);
+        super::select(3);
+        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(3));
+        super::press("search");
+        super::select(1);
+        {
+            let s = super::STATE.lock().unwrap();
+            let q = s.search.as_ref().unwrap();
+            assert_eq!(s.wins[q.hits[q.sel].0].id, 1, "hover follows search results too");
+        }
+        super::close_window(2);
+        assert_eq!(super::STATE.lock().unwrap().closing, Some(2), "the first click only arms");
+        super::select(3);
+        assert!(super::STATE.lock().unwrap().closing.is_none(), "hovering another row disarms");
+        super::press("search");
+        super::press("pin");
+        let mut s = super::STATE.lock().unwrap();
+        assert!(s.open && s.search.is_none() && s.previews_pinned);
+        s.previews_pinned = false;
+        super::close(&mut s);
+    }
+
+    #[test]
+    fn alt_h_hides_windows_from_now_on() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let before = crate::settings::get();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(2, "Steam".into(), "Friends".into()), Win::new(3, "Steam".into(), "Store".into())];
+        for (win, hint) in s.wins.iter_mut().zip(["c", "s1", "s2"]) { win.key = hint.into(); }
+        s.active = Some(1);
+        drop(s);
+        super::on_key(Key::Alt, true);
+        assert!(super::on_key(Key::Char('h'), true), "Alt+H is ours");
+        super::on_key(Key::Alt, false);
+        {
+            let s = super::STATE.lock().unwrap();
+            assert!(s.open);
+            assert_eq!(s.wins.iter().map(|w| w.id).collect::<Vec<_>>(), vec![1, 3], "only the selected Steam window goes");
+        }
+        assert_eq!(crate::settings::get().hidden, vec![crate::settings::Hidden { app: "Steam".into(), title: Some("Friends".into()) }]);
+        let later = vec![Win::new(4, "Steam".into(), "Friends".into()), Win::new(5, "Steam".into(), "Store".into())];
+        assert_eq!(super::without_hidden(later.clone()).iter().map(|w| w.id).collect::<Vec<_>>(), vec![5], "still hidden next time");
+        super::hide_window(3, true);
+        assert_eq!(super::STATE.lock().unwrap().wins.len(), 1, "Shift+click hides every Steam window");
+        assert!(super::without_hidden(later).is_empty());
+        let mut s = super::STATE.lock().unwrap();
+        s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(6, "Mail".into(), "Inbox".into())];
+        s.active = Some(2);
+        assert_eq!(super::selected_hint(&s), Some(1), "with the active window hidden, the first row is the previous one");
+        super::close(&mut s);
+        crate::settings::set(before);
     }
 
     #[cfg(target_os = "linux")]

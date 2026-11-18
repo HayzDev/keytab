@@ -1,4 +1,8 @@
 fn main() {
+    // The commit a CI build came from, so the updater can tell nightlies apart (updater.rs).
+    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+    println!("cargo:rerun-if-env-changed=KEYTAB_CHANNEL");
+    println!("cargo:rustc-env=KEYTAB_COMMIT={}", std::env::var("GITHUB_SHA").unwrap_or_default());
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
         let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
         let protocols = pkg_config::get_variable("wayland-protocols", "pkgdatadir")

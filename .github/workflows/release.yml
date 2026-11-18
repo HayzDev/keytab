@@ -1,12 +1,25 @@
 name: Release
 
-# Push a tag like v0.2.0 (matching the version in Cargo.toml) to publish a release.
+# Stable: push a tag like v0.2.0 (matching the version in Cargo.toml).
+# Nightly: every push to main replaces the `nightly` prerelease. The in-app updater
+# (src/updater.rs) reads both; `releases/latest` links only ever see stable releases.
 on:
   push:
     tags: ['v*']
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+# A newer push to main supersedes a nightly still building; tags never cancel each other.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+env:
+  # Baked into the binary so the updater knows what it is (updater::built_channel).
+  KEYTAB_CHANNEL: ${{ github.ref_type == 'tag' && 'stable' || 'nightly' }}
 
 jobs:
   windows:
@@ -14,6 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Check tag matches Cargo.toml version
+        if: github.ref_type == 'tag'
         shell: bash
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
@@ -28,7 +42,7 @@ jobs:
         shell: bash
         run: |
           mkdir dist
-          cp target/release/bundle/nsis/*-setup.exe dist/
+          if [ "$KEYTAB_CHANNEL" = stable ]; then cp target/release/bundle/nsis/*-setup.exe dist/; fi
           cp target/release/bundle/nsis/*-setup.exe dist/keytab-setup.exe
       - uses: actions/upload-artifact@v4
         with:
@@ -69,6 +83,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Create GitHub release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -88,3 +103,19 @@ jobs:
           NOTES
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
             --title "keytab $GITHUB_REF_NAME" --notes-file notes.md --generate-notes
+      # The updater compares the "Commit:" line with the commit a nightly was built from.
+      - name: Replace the nightly prerelease
+        if: github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          short=${GITHUB_SHA::7}
+          cat > notes.md <<NOTES
+          Built automatically from \`main\`. Newer than the latest stable release, and may break.
+          Switch to it in keytab: tray icon → Settings → Updates → Release channel → Nightly.
+
+          Commit: ${GITHUB_SHA}
+          NOTES
+          gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create nightly dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --title "keytab nightly ($short)" --notes-file notes.md

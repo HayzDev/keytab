@@ -56,6 +56,7 @@ All downloads are on the [Releases page](https://github.com/HayzDev/keytab/relea
 | Delete | ask to close the selected window; press again to confirm. In the hint dialog: reset to default |
 | `\` | set a hint for this one window (lives as long as the window) |
 | `\|` | set a hint for every window of this app (saved to disk) |
+| **Alt+H** | hide the selected window from keytab for good (see below) |
 | Esc / CapsLock | close or go back |
 
 Partial hint matches prioritize other windows ahead of the window that was active
@@ -71,7 +72,30 @@ The cache is scoped to the Niri instance (boot, process start time, and socket),
 so a new desktop session cannot inherit old window IDs. Window titles may change
 without losing their hint. Windows per-window hints still remain in memory.
 
+Hidden windows (Alt+H, or a row's hide button; Shift+click hides every window of the app) are kept in
+`settings.json` under `hidden`, matched by app name and exact window title, case-insensitively. A window whose
+title changes shows up again. Bring them back from Settings › Switcher › Hidden windows (Windows), or by
+deleting the entry from `settings.json` and restarting keytab (Linux).
+
 App hints are saved in `%APPDATA%\keytab\app-hints.json` on Windows and `~/.config/keytab/app-hints.json` on Linux. The file maps lowercase app name to hint.
+
+### Mouse (Windows)
+
+Hovering a row selects it (and previews it while previews are on). Click a row to switch to it.
+Middle-click it to close the window. The hovered row also shows a tag button (set a hint; Shift+click
+sets one for the whole app), a hide button (Shift+click hides the whole app) and a × button. Every key in the footer is clickable, the preview opens its
+window when clicked, and the gear opens Settings. Clicks never take focus away from the window you came from.
+
+### Settings and updates (Windows)
+
+Open Settings from the gear in the switcher, by clicking the tray icon, or with `keytab --settings`. It has:
+start at login, the open key (Right Alt, Right Ctrl, Right Win, Menu or Caps Lock), the theme, hover selection,
+close confirmation, previews on by default, hidden windows, your saved app hints, and updates. Settings are saved to `%APPDATA%\keytab\settings.json`.
+
+**Updates** come from GitHub Releases on one of two channels. **Stable** gets tagged releases. **Nightly** is the
+`nightly` prerelease, rebuilt from every push to `main`. With *Update automatically* on (the default), keytab
+checks for an update about 10 seconds after it starts, waits until the switcher is closed, then installs the update
+silently and restarts. *Check now* and *Update* in Settings do the same thing on demand. Debug builds never auto-update.
 
 ## Build
 
@@ -100,6 +124,10 @@ git tag v0.2.0 && git push origin v0.2.0
 The [Release workflow](.github/workflows/release.yml) builds the Windows installer and the Linux
 archive and publishes them as a GitHub release. `keytab-setup.exe` and `keytab-linux-x86_64.tar.gz`
 keep the same names every release, so the `releases/latest/download/...` links always work.
+
+The same workflow runs on every push to `main` too. It replaces the `nightly` prerelease, and the release notes'
+`Commit: <sha>` line tells the updater whether a nightly is new. Prereleases never become
+`releases/latest`, so stable download links are unaffected.
 
 ### Fedora deps
 

@@ -8,7 +8,7 @@ use crate::switcher::{on_key, Key};
 use tauri::WebviewWindow;
 use windows::core::{BOOL, PWSTR};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::Mutex;
 use windows::core::{s, w, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM};
@@ -272,17 +272,35 @@ pub fn init(overlay: &WebviewWindow) -> tauri::Result<()> {
     let h = HWND(overlay.hwnd()?.0 as _);
     OVERLAY.store(h.0 as isize, Ordering::Relaxed);
     unsafe {
+        // Clicks (rows, footer keys) must not activate the overlay: the window you were in
+        // keeps focus until you pick another, exactly as with the keyboard.
+        let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+        SetWindowLongPtrW(h, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE.0 as isize);
+        create_frame(h);
+    }
+    glass(h);
+    Ok(())
+}
+
+/// Rounded corners and the acrylic blur, for the overlay and the settings window. Either
+/// window's page paints its tint (`--card`) over the blur.
+fn glass(h: HWND) {
+    unsafe {
         let round = DWMWCP_ROUND;
         let _ = DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &round as *const _ as _, size_of_val(&round) as u32);
-        create_frame(h);
-        let Ok(user32) = GetModuleHandleW(w!("user32.dll")) else { return Ok(()) };
-        let Some(f) = GetProcAddress(user32, s!("SetWindowCompositionAttribute")) else { return Ok(()) };
+        let Ok(user32) = GetModuleHandleW(w!("user32.dll")) else { return };
+        let Some(f) = GetProcAddress(user32, s!("SetWindowCompositionAttribute")) else { return };
         let f: unsafe extern "system" fn(HWND, *mut CompositionData) -> BOOL = std::mem::transmute(f);
         // ACCENT_ENABLE_ACRYLICBLURBEHIND, tint 0xAABBGGRR; the CSS card adds the real tint.
         let mut accent = AccentPolicy { state: 4, flags: 0, color: 0x20141210, animation: 0 };
         let mut data = CompositionData { attribute: 19, data: &mut accent as *mut _ as _, size: size_of::<AccentPolicy>() };
         let _ = f(h, &mut data);
     }
+}
+
+/// The settings window: the overlay's glass, no title bar (the page draws its own).
+pub fn init_settings(w: &WebviewWindow) -> tauri::Result<()> {
+    glass(HWND(w.hwnd()?.0 as _));
     Ok(())
 }
 
@@ -455,10 +473,27 @@ pub fn layout(card: Option<(f64, f64, f64, f64)>, rects: &[(WinId, f64, f64, f64
 
 // ---- input -----------------------------------------------------------------------
 
-/// Virtual-key code -> Key. Right Alt activates, Right Shift (while held) searches.
+/// The key that opens the switcher (settings `hotkey`); Right Alt by default.
+static ACTIVATE_VK: AtomicU32 = AtomicU32::new(VK_RMENU.0 as u32);
+
+/// Apply the `hotkey` setting. Unknown names fall back to Right Alt.
+pub fn set_hotkey(name: &str) {
+    let vk = match name {
+        "RightCtrl" => VK_RCONTROL,
+        "RightWin" => VK_RWIN,
+        "Apps" => VK_APPS,
+        "CapsLock" => VK_CAPITAL,
+        _ => VK_RMENU,
+    };
+    ACTIVATE_VK.store(vk.0 as u32, Ordering::Relaxed);
+}
+
+/// Virtual-key code -> Key. The hotkey activates, Right Shift (while held) searches.
 fn translate(vk: u32) -> Key {
+    if vk == ACTIVATE_VK.load(Ordering::Relaxed) {
+        return Key::Activate;
+    }
     match VIRTUAL_KEY(vk as u16) {
-        VK_RMENU => Key::Activate,
         VK_RSHIFT => Key::Search,
         VK_LSHIFT => Key::Preview,
         VK_ESCAPE | VK_CAPITAL => Key::Esc,
@@ -500,7 +535,9 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         // AltGr layouts send a fake Left Ctrl (scan code 0x21D) with Right Alt; it must not
         // count as Ctrl (which selects the current window).
         let altgr_ctrl = kb.vkCode == VK_LCONTROL.0 as u32 && kb.scanCode & 0x200 != 0;
-        if kb.flags.0 & LLKHF_INJECTED.0 == 0 && !altgr_ctrl {
+        // The `demo` feature (for recording the README demo) accepts scripted keystrokes.
+        let injected = !cfg!(feature = "demo") && kb.flags.0 & LLKHF_INJECTED.0 != 0;
+        if !injected && !altgr_ctrl {
             let key = translate(kb.vkCode);
             // Shift always passes through: a bare Shift is harmless to the app behind, and
             // swallowing it would hide it from GetAsyncKeyState (`|` detection).
@@ -545,6 +582,15 @@ pub fn start_input() {
 /// `HKCU\...\Run` value that starts keytab at login. The installer sets it on first install.
 const RUN_KEY: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
 const RUN_VALUE: PCWSTR = w!("keytab");
+
+/// Where the installer puts keytab (per-user NSIS install), for restarting after an update.
+pub fn installed_exe() -> std::path::PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(|d| std::path::PathBuf::from(d).join("keytab").join("keytab.exe"))
+        .filter(|p| p.exists())
+        .or_else(|| std::env::current_exe().ok())
+        .unwrap_or_default()
+}
 
 pub fn autostart() -> bool {
     use windows::Win32::System::Registry::*;

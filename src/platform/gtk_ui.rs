@@ -174,7 +174,7 @@ fn native_search_key(input: Key, modifiers: gtk::gdk::ModifierType) -> bool {
         Key::Esc | Key::Enter | Key::Up | Key::Down | Key::Ctrl | Key::Alt | Key::Preview | Key::Search | Key::HintWindow | Key::HintApp => false,
         Key::Delete => ctrl || modifiers.contains(ModifierType::SHIFT_MASK),
         Key::Char('p') if ctrl => false,
-        Key::Char('j' | 'k') if alt => false,
+        Key::Char('j' | 'k' | 'h') if alt => false,
         _ => true,
     }
 }
@@ -318,11 +318,11 @@ fn footer(view: &View<'_>) -> String {
     if view.closing.is_some() { return "Close selected window?  ⌦ close window · ⎋ cancel".into(); }
     let mut actions: Vec<String> = Vec::new();
     if view.search.is_some() { actions.push("Type to search".into()); }
-    actions.extend(["↵ open".into(), "⌃ current window".into()]);
+    actions.extend(["↵ open".into(), "Ctrl current window".into()]);
     if !view.typed.is_empty() { actions.push("⌫ back".into()); }
-    actions.push(if view.pinned { "⌃P turn preview off" } else if view.preview { "⌃P keep preview on" } else { "L⇧ preview" }.into());
+    actions.push(if view.pinned { "Ctrl+P turn preview off" } else if view.preview { "Ctrl+P keep preview on" } else { "L⇧ preview" }.into());
     if view.typed.is_empty() { actions.push(if view.search.is_some() { "R⇧ hints" } else if view.preview { "R⇧ search" } else { "R⇧ or / search" }.into()); }
-    if !view.preview && view.typed.is_empty() { actions.push("⧵ set hint · ⌦ close window".into()); }
+    if !view.preview && view.typed.is_empty() { actions.push("⧵ set hint · Alt+H hide · ⌦ close window".into()); }
     actions.push("⎋ dismiss".into());
     actions.join(" · ")
 }
@@ -337,7 +337,7 @@ fn render_legend(parent: &gtk::Box, text: &str, available: i32) {
     for action in text.split(" · ") {
         let group = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         for token in action.split_whitespace() {
-            let keycap = ["↵", "⌃", "⌃P", "L⇧", "R⇧", "⌫", "⌦", "⎋", "⧵", "/"].contains(&token);
+            let keycap = ["↵", "Ctrl", "Ctrl+P", "Alt+H", "L⇧", "R⇧", "⌫", "⌦", "⎋", "⧵", "/"].contains(&token);
             let item = label(token, if keycap { "keytab-keycap" } else { "keytab-help" });
             item.set_valign(gtk::Align::Center);
             if keycap { item.set_xalign(0.5); }
@@ -611,7 +611,7 @@ mod tests {
         win.key = "b2".into();
         let mut view = crate::switcher::View { rows: vec![crate::switcher::Row { win: &win, hits: &[] }], typed: "b", search: None, edit: None, dom_input: true, preview: true, pinned: false, selected: Some(1), closing: None };
         assert!(!footer(&view).contains("to finish"));
-        assert!(footer(&view).contains("⌃P keep preview on"));
+        assert!(footer(&view).contains("Ctrl+P keep preview on"));
         assert!(!footer(&view).contains("set hint"));
         view.pinned = true;
         assert!(footer(&view).contains("turn preview off"));
