@@ -1,8 +1,8 @@
 #!/bin/sh
 action=${1:---toggle}
 case "$action" in
-    --toggle|--search|--quit) ;;
-    *) echo "usage: keytabctl [--toggle|--search|--quit]" >&2; exit 2 ;;
+    --toggle|--search|--settings|--quit) ;;
+    *) echo "usage: keytabctl [--toggle|--search|--settings|--quit]" >&2; exit 2 ;;
 esac
 
 if gdbus call --session --dest dev.keytab.app.SingleInstance \

@@ -22,10 +22,20 @@ struct Ui {
     entry: gtk::Entry,
     updating_query: Rc<Cell<bool>>,
     searching: bool,
+    /// Where the pointer last moved (root coordinates): rebuilding the list under a still
+    /// pointer must not move the selection (hover selects only on real movement).
+    pointer: Rc<Cell<Option<(f64, f64)>>>,
 }
 
 thread_local! {
     static UI: RefCell<Option<Ui>> = const { RefCell::new(None) };
+    /// The light colors are in use (Theme setting, or the desktop's preference).
+    static LIGHT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Matched characters in search results: the theme's accent.
+fn accent() -> &'static str {
+    if LIGHT.with(Cell::get) { "#2f6bff" } else { "#8ab4ff" }
 }
 
 const CSS: &str = r#"
@@ -41,9 +51,9 @@ window#keytab { background-color: transparent; }
 #keytab .keytab-row { padding: 6px 10px; border-radius: 6px; background: transparent; min-height: 28px; }
 #keytab .keytab-row:selected { background: rgba(138,180,255,0.26); }
 #keytab .keytab-row.closing { background: rgba(255,110,110,0.2); }
-#keytab .keytab-app { font-weight: 600; }
+#keytab .keytab-app { font-weight: 600; color: #ededf2; }
 #keytab .keytab-title, #keytab .keytab-help { color: #a8a8b3; }
-#keytab .keytab-hint { border-radius: 5px; padding: 3px 4px; font: bold 13px monospace; }
+#keytab .keytab-hint { border-radius: 5px; padding: 3px 4px; font: bold 13px monospace; color: #ededf2; }
 #keytab .keytab-hint.window, #keytab .keytab-hint.app { color: #f2c35b; }
 #keytab .keytab-hint.window { text-decoration-line: underline; }
 #keytab .keytab-row:selected .keytab-hint { background-color: #8ab4ff; color: #0d1424; }
@@ -70,6 +80,54 @@ window#keytab { background-color: transparent; }
 #keytab .keytab-preview > border { border: none; }
 #keytab .keytab-preview.unavailable { border: none; }
 #keytab .keytab-monogram { background: #3b617d; border-radius: 5px; font-size: 12px; font-weight: bold; color: white; }
+#keytab.no-hover-select .keytab-row:hover:not(:selected) { background: rgba(255,255,255,0.06); }
+
+/* Mouse: row buttons (hint, hide, close) on the hovered row, clickable footer keys, gear. */
+#keytab button.keytab-act, #keytab button.keytab-action, #keytab button.keytab-gear {
+    background: none; background-image: none; border: none; box-shadow: none; text-shadow: none;
+    -gtk-icon-shadow: none; outline: none; min-height: 0; min-width: 0; color: #a8a8b3;
+}
+#keytab button.keytab-act { padding: 5px; border-radius: 5px; opacity: 0; }
+#keytab .keytab-row:hover button.keytab-act, #keytab .keytab-row.closing button.keytab-act { opacity: 1; }
+#keytab button.keytab-act:hover, #keytab button.keytab-gear:hover { background-color: rgba(255,255,255,0.11); color: #ededf2; }
+#keytab button.keytab-act.x:hover, #keytab .keytab-row.closing button.keytab-act.x { background-color: #ff8a8a; color: #0d1424; }
+#keytab button.keytab-action { padding: 3px 7px 3px 3px; margin: -3px 0; border-radius: 7px; }
+#keytab button.keytab-action:hover { background-color: rgba(255,255,255,0.06); }
+#keytab button.keytab-action:hover .keytab-help { color: #ededf2; }
+#keytab button.keytab-gear { padding: 3px 5px; margin: -3px -4px -3px 0; border-radius: 7px; }
+#keytab .keytab-warn { color: #ff8a8a; font-weight: 600; }
+#keytab .keytab-clickable:hover { box-shadow: 0 0 0 1px rgba(255,255,255,0.4); }
+
+/* Light colors (Settings > Theme, or the desktop's preference). */
+#keytab.light .keytab-card {
+    background-color: rgba(248,248,251,0.9); background-image: linear-gradient(rgba(255,255,255,0.3), transparent);
+    border-color: rgba(0,0,0,0.14); color: #17171c;
+}
+#keytab.light .keytab-app, #keytab.light .keytab-hint { color: #17171c; }
+#keytab.light .keytab-title, #keytab.light .keytab-help, #keytab.light button.keytab-act,
+#keytab.light button.keytab-action, #keytab.light button.keytab-gear { color: #55555f; }
+#keytab.light .keytab-row:selected { background: rgba(47,107,255,0.16); }
+#keytab.light .keytab-row.closing { background: rgba(220,50,50,0.13); }
+#keytab.light.no-hover-select .keytab-row:hover:not(:selected) { background: rgba(0,0,0,0.04); }
+#keytab.light .keytab-hint.window, #keytab.light .keytab-hint.app, #keytab.light .keytab-slot.on { color: #c98a00; }
+#keytab.light .keytab-slot.on { border-color: #c98a00; }
+#keytab.light .keytab-row:selected .keytab-hint { background-color: #2f6bff; color: #ffffff; }
+#keytab.light .keytab-row:selected .keytab-hint.window, #keytab.light .keytab-row:selected .keytab-hint.app { background-color: #c98a00; color: #17171c; }
+#keytab.light .keytab-row.closing .keytab-hint, #keytab.light button.keytab-act.x:hover,
+#keytab.light .keytab-row.closing button.keytab-act.x { background-color: #c62828; color: #ffffff; }
+#keytab.light .keytab-error, #keytab.light .keytab-warn { color: #c62828; }
+#keytab.light .keytab-query { background: rgba(0,0,0,0.04); }
+#keytab.light entry { color: #17171c; }
+#keytab.light .keytab-footer { border-top-color: rgba(0,0,0,0.07); }
+#keytab.light .keytab-keycap { color: #17171c; }
+#keytab.light .keytab-keycap, #keytab.light .keytab-hint, #keytab.light .keytab-slot {
+    background-color: rgba(0,0,0,0.07); background-image: none; border-color: rgba(0,0,0,0.07); box-shadow: none;
+}
+#keytab.light .keytab-preview { border-color: rgba(0,0,0,0.14); }
+#keytab.light button.keytab-act:hover, #keytab.light button.keytab-gear:hover { background-color: rgba(0,0,0,0.07); color: #17171c; }
+#keytab.light button.keytab-action:hover { background-color: rgba(0,0,0,0.04); }
+#keytab.light button.keytab-action:hover .keytab-help { color: #17171c; }
+#keytab.light .keytab-clickable:hover { box-shadow: 0 0 0 1px rgba(0,0,0,0.3); }
 "#;
 
 pub(crate) fn init(window: &gtk::Window) {
@@ -123,7 +181,7 @@ pub(crate) fn init(window: &gtk::Window) {
     entry.set_placeholder_text(Some("Search windows"));
     let search_header = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     search_header.style_context().add_class("keytab-query");
-    search_header.pack_start(&gtk::Image::from_icon_name(Some("system-search-symbolic"), gtk::IconSize::Menu), false, false, 0);
+    search_header.pack_start(&line_icon(include_str!("../../ui/icons/search.svg"), 16), false, false, 0);
     search_header.pack_start(&entry, true, true, 0);
     let updating_query = Rc::new(Cell::new(false));
     let updating = updating_query.clone();
@@ -159,7 +217,26 @@ pub(crate) fn init(window: &gtk::Window) {
         UI.with(|ui| { if let Some(ui) = ui.borrow_mut().as_mut() { ui.right_shift = false; } });
         gtk::glib::Propagation::Proceed
     });
-    UI.with(|ui| *ui.borrow_mut() = Some(Ui { window: window.clone(), card, content, previews: BTreeMap::new(), capture: None, capture_running: false, attempted: BTreeMap::new(), apps: gtk::gio::AppInfo::all(), right_shift: false, search_header, entry, updating_query, searching: false }));
+    UI.with(|ui| *ui.borrow_mut() = Some(Ui { window: window.clone(), card, content, previews: BTreeMap::new(), capture: None, capture_running: false, attempted: BTreeMap::new(), apps: gtk::gio::AppInfo::all(), right_shift: false, search_header, entry, updating_query, searching: false, pointer: Rc::new(Cell::new(None)) }));
+    apply_settings();
+}
+
+/// Apply the Theme and Hovering-selects settings to the switcher. Main thread.
+pub(crate) fn apply_settings() {
+    let s = crate::settings::get();
+    let light = match s.theme.as_str() {
+        "light" => true,
+        "dark" => false,
+        _ => super::niri::system_scheme() == Some("light"),
+    };
+    LIGHT.with(|l| l.set(light));
+    UI.with(|ui| {
+        let Some(ui) = ui.borrow().as_ref().map(|ui| ui.window.clone()) else { return };
+        let style = ui.style_context();
+        if light { style.add_class("light") } else { style.remove_class("light") }
+        if s.hover_select { style.remove_class("no-hover-select") } else { style.add_class("no-hover-select") }
+    });
+    switcher::refresh();
 }
 
 pub(crate) fn window() -> gtk::Window {
@@ -211,7 +288,7 @@ fn highlighted(text: &str, hits: &[usize], offset: usize) -> String {
         let next = hits.contains(&(i + offset));
         if next != marked {
             out.push_str(&gtk::glib::markup_escape_text(&text[start..byte]));
-            out.push_str(if next { "<span foreground='#8ab4ff' weight='bold' underline='single'>" } else { "</span>" });
+            out.push_str(&if next { format!("<span foreground='{}' weight='bold' underline='single'>", accent()) } else { "</span>".into() });
             start = byte;
             marked = next;
         }
@@ -281,12 +358,110 @@ fn thumbnail(pixbuf: Option<&gtk::gdk_pixbuf::Pixbuf>, display_scale: i32) -> gt
     frame
 }
 
-fn app_icon(app: &str, apps: &[gtk::gio::AppInfo]) -> gtk::Widget {
+/// The app's icon: its desktop entry by niri app id, else by name, else a themed icon
+/// named after the app id.
+fn find_icon(app_id: Option<&str>, app: &str, apps: &[gtk::gio::AppInfo]) -> Option<gtk::gio::Icon> {
     let name = app.to_lowercase();
-    let info = apps.iter().find(|info| {
-        info.display_name().to_lowercase() == name || info.id().is_some_and(|id| id.to_lowercase().trim_end_matches(".desktop").rsplit('.').next() == Some(name.as_str()))
+    let id = app_id.map(str::to_lowercase);
+    let entry = |info: &gtk::gio::AppInfo| info.id().map(|i| i.to_lowercase().trim_end_matches(".desktop").to_string());
+    let by_id = id.as_ref().and_then(|id| apps.iter().find(|info| entry(info).as_ref() == Some(id)));
+    let by_name = || (!name.is_empty()).then(|| apps.iter().find(|info| {
+        info.display_name().to_lowercase() == name || entry(info).is_some_and(|e| e.rsplit('.').next() == Some(name.as_str()))
+    })).flatten();
+    by_id.or_else(by_name).and_then(|info| info.icon()).or_else(|| {
+        let id = app_id?;
+        gtk::IconTheme::default()?.has_icon(id).then(|| gtk::gio::ThemedIcon::new(id).upcast())
+    })
+}
+
+/// `find_icon` with the installed apps. Main thread.
+pub(crate) fn icon_for(app_id: Option<&str>, app: &str) -> Option<gtk::gio::Icon> {
+    UI.with(|ui| ui.borrow().as_ref().and_then(|ui| find_icon(app_id, app, &ui.apps)))
+}
+
+fn line_icon(svg: &'static str, size: i32) -> gtk::DrawingArea {
+    use gtk::gdk::prelude::GdkPixbufExt;
+    thread_local! {
+        static MASKS: RefCell<BTreeMap<(&'static str, i32, i32), Option<gtk::cairo::Surface>>> = RefCell::default();
+    }
+    let icon = gtk::DrawingArea::new();
+    icon.set_has_window(false);
+    icon.set_size_request(size, size);
+    icon.set_halign(gtk::Align::Center);
+    icon.set_valign(gtk::Align::Center);
+    icon.connect_draw(move |icon, cr| {
+        let scale = icon.scale_factor();
+        MASKS.with(|masks| {
+            let mut masks = masks.borrow_mut();
+            // Draw the same SVG as Windows at the monitor's physical scale and tint it with GTK's foreground.
+            let mask = masks.entry((svg, size, scale)).or_insert_with(|| {
+                let bytes = gtk::glib::Bytes::from_static(svg.as_bytes());
+                let stream = gtk::gio::MemoryInputStream::from_bytes(&bytes);
+                gtk::gdk_pixbuf::Pixbuf::from_stream_at_scale(
+                    &stream, size * scale, size * scale, true, gtk::gio::Cancellable::NONE,
+                ).ok()?.create_surface(scale, None::<&gtk::gdk::Window>)
+            });
+            if let Some(mask) = mask {
+                let color = icon.style_context().color(icon.state_flags());
+                cr.set_source_rgba(color.red(), color.green(), color.blue(), color.alpha());
+                let _ = cr.mask_surface(mask, 0., 0.);
+            }
+        });
+        gtk::glib::Propagation::Proceed
     });
-    if let Some(icon) = info.and_then(|info| info.icon()) {
+    icon
+}
+
+fn legend_token(token: &str, class: &str) -> gtk::Widget {
+    let svg = match token {
+        "↵" => include_str!("../../ui/icons/enter.svg"),
+        "L⇧" | "R⇧" => include_str!("../../ui/icons/shift.svg"),
+        "⌫" => include_str!("../../ui/icons/backspace.svg"),
+        "⌦" => include_str!("../../ui/icons/delete.svg"),
+        "⧵" => include_str!("../../ui/icons/backslash.svg"),
+        _ => {
+            let item = label(if token == "⎋" { "esc" } else { token }, class);
+            if class == "keytab-keycap" { item.set_xalign(0.5); }
+            return item.upcast();
+        }
+    };
+    let cap = gtk::Box::new(gtk::Orientation::Horizontal, 1);
+    cap.style_context().add_class(class);
+    let contents = gtk::Box::new(gtk::Orientation::Horizontal, 1);
+    cap.set_center_widget(Some(&contents));
+    if matches!(token, "L⇧" | "R⇧") {
+        contents.pack_start(&gtk::Label::new(Some(&token[..1])), false, false, 0);
+    }
+    contents.pack_start(&line_icon(svg, 13), false, false, 0);
+    cap.upcast()
+}
+
+/// A borderless button that never takes keyboard focus from the overlay.
+fn flat_button(class: &str, child: &impl IsA<gtk::Widget>, tooltip: &str) -> gtk::Button {
+    let button = gtk::Button::new();
+    button.style_context().add_class(class);
+    button.set_relief(gtk::ReliefStyle::None);
+    button.set_can_focus(false);
+    button.set_focus_on_click(false);
+    button.set_valign(gtk::Align::Center);
+    if !tooltip.is_empty() { button.set_tooltip_text(Some(tooltip)); }
+    button.add(child);
+    button
+}
+
+/// Shift was held for the click being handled (Shift+click acts on the whole app).
+fn shift_click() -> bool {
+    gtk::current_event_state().is_some_and(|m| m.contains(gtk::gdk::ModifierType::SHIFT_MASK))
+}
+
+/// Run after the current GTK event: switcher calls re-render, which replaces the widget
+/// whose handler is running.
+fn later(f: impl FnOnce() + 'static) {
+    gtk::glib::idle_add_local_once(f);
+}
+
+fn app_icon(id: WinId, app: &str, apps: &[gtk::gio::AppInfo]) -> gtk::Widget {
+    if let Some(icon) = find_icon(super::niri::app_id(id).as_deref(), app, apps) {
         let image = gtk::Image::from_gicon(&icon, gtk::IconSize::Menu);
         image.set_pixel_size(20);
         image.set_valign(gtk::Align::Center);
@@ -310,50 +485,88 @@ fn clean_title<'a>(title: &'a str, app: &str) -> &'a str {
     title
 }
 
-fn footer(view: &View<'_>) -> String {
+/// The footer: what each key does now, and what clicking it presses (`switcher::press`, or
+/// "settings"). The same order as the Windows footer.
+fn footer_items(view: &View<'_>) -> Vec<(String, Option<&'static str>)> {
+    let item = |text: &str, act: &'static str| (text.to_string(), Some(act));
     if let Some(edit) = view.edit {
-        let reset = if matches!((edit.scope, edit.kind), (Scope::App, crate::keys::Kind::App) | (Scope::Window, crate::keys::Kind::Window)) { " · ⌦ reset to automatic" } else { "" };
-        return format!("{}{reset} · ⎋ back", if edit.error.is_some() { "⌫ change" } else { "↵ save" });
+        let mut items = vec![if edit.error.is_some() { item("⌫ change", "Back") } else { item("↵ save", "Enter") }];
+        if matches!((edit.scope, edit.kind), (Scope::App, crate::keys::Kind::App) | (Scope::Window, crate::keys::Kind::Window)) {
+            items.push(item("⌦ reset to automatic", "Delete"));
+        }
+        items.push(item("⎋ back", "Esc"));
+        return items;
     }
-    if view.closing.is_some() { return "Close selected window?  ⌦ close window · ⎋ cancel".into(); }
-    let mut actions: Vec<String> = Vec::new();
-    if view.search.is_some() { actions.push("Type to search".into()); }
-    actions.extend(["↵ open".into(), "Ctrl current window".into()]);
-    if !view.typed.is_empty() { actions.push("⌫ back".into()); }
-    actions.push(if view.pinned { "Ctrl+P turn preview off" } else if view.preview { "Ctrl+P keep preview on" } else { "L⇧ preview" }.into());
-    if view.typed.is_empty() { actions.push(if view.search.is_some() { "R⇧ hints" } else if view.preview { "R⇧ search" } else { "R⇧ or / search" }.into()); }
-    if !view.preview && view.typed.is_empty() { actions.push("⧵ set hint · Alt+H hide · ⌦ close window".into()); }
-    actions.push("⎋ dismiss".into());
-    actions.join(" · ")
+    if view.closing.is_some() {
+        return vec![("Close selected window?".into(), None), item("⌦ close window", "Delete"), item("⎋ cancel", "Esc")];
+    }
+    let mut items = Vec::new();
+    if view.search.is_some() { items.push(("Type to search".into(), None)); }
+    items.extend([item("↵ open", "Enter"), item("Ctrl current window", "current")]);
+    if !view.typed.is_empty() { items.push(item("⌫ back", "Back")); }
+    // A click can't hold Shift, so clicking L⇧ pins the preview like Ctrl+P.
+    items.push(item(if view.pinned { "Ctrl+P turn preview off" } else if view.preview { "Ctrl+P keep preview on" } else { "L⇧ preview" }, "pin"));
+    if view.typed.is_empty() { items.push(item(if view.search.is_some() { "R⇧ hints" } else if view.preview { "R⇧ search" } else { "R⇧ or / search" }, "search")); }
+    if !view.preview && view.typed.is_empty() {
+        items.extend([item("⧵ set hint", "HintWindow"), item("Alt+H hide", "hide"), item("⌦ close window", "Delete")]);
+    }
+    items.push(item("⎋ dismiss", "Esc"));
+    items
 }
 
-fn render_legend(parent: &gtk::Box, text: &str, available: i32) {
+#[cfg(test)]
+fn footer(view: &View<'_>) -> String {
+    footer_items(view).into_iter().map(|(text, _)| text).collect::<Vec<_>>().join(" · ")
+}
+
+fn press(act: &'static str) {
+    if act == "settings" { crate::show_settings(); } else { switcher::press(act); }
+}
+
+fn render_legend(parent: &gtk::Box, items: &[(String, Option<&'static str>)], gear: bool, available: i32) {
     let foot = gtk::Box::new(gtk::Orientation::Vertical, 6);
     foot.style_context().add_class("keytab-footer");
     parent.pack_start(&foot, false, false, 0);
-    let mut row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    let mut row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     foot.pack_start(&row, false, false, 0);
     let mut used = 0;
-    for action in text.split(" · ") {
+    let mut widgets: Vec<gtk::Widget> = Vec::new();
+    for (text, act) in items {
         let group = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        for token in action.split_whitespace() {
+        for token in text.split_whitespace() {
             let keycap = ["↵", "Ctrl", "Ctrl+P", "Alt+H", "L⇧", "R⇧", "⌫", "⌦", "⎋", "⧵", "/"].contains(&token);
-            let item = label(token, if keycap { "keytab-keycap" } else { "keytab-help" });
+            let class = if keycap { "keytab-keycap" } else if act.is_none() && text.ends_with('?') { "keytab-warn" } else { "keytab-help" };
+            let item = legend_token(token, class);
             item.set_valign(gtk::Align::Center);
-            if keycap { item.set_xalign(0.5); }
             group.pack_start(&item, false, false, 0);
         }
-        row.pack_start(&group, false, false, 0);
-        group.show_all();
-        let width = group.preferred_width().1;
-        if used > 0 && used + 10 + width > available {
-            row.remove(&group);
-            row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        widgets.push(match act {
+            Some(act) => {
+                let act = *act;
+                let button = flat_button("keytab-action", &group, "");
+                button.connect_clicked(move |_| later(move || press(act)));
+                button.upcast()
+            }
+            None => group.upcast(),
+        });
+    }
+    if gear {
+        let button = flat_button("keytab-gear", &line_icon(include_str!("../../ui/icons/gear.svg"), 15), "Settings");
+        button.connect_clicked(|_| later(|| press("settings")));
+        widgets.push(button.upcast());
+    }
+    for widget in widgets {
+        row.pack_start(&widget, false, false, 0);
+        widget.show_all();
+        let width = widget.preferred_width().1;
+        if used > 0 && used + 4 + width > available {
+            row.remove(&widget);
+            row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
             foot.pack_start(&row, false, false, 0);
-            row.pack_start(&group, false, false, 0);
+            row.pack_start(&widget, false, false, 0);
             used = width;
         } else {
-            used += if used == 0 { width } else { 10 + width };
+            used += if used == 0 { width } else { 4 + width };
         }
     }
 }
@@ -400,6 +613,23 @@ fn capture(ids: Vec<WinId>, cancel: Arc<AtomicBool>, display_scale: i32) {
             switcher::refresh();
         });
     });
+}
+
+/// The hovered row's buttons: set a hint, hide, close (Shift+click: for the whole app).
+fn row_buttons(win: &crate::keys::Win, closing: bool) -> gtk::Box {
+    let acts = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    let id = win.id;
+    let hint = flat_button("keytab-act", &line_icon(include_str!("../../ui/icons/tag.svg"), 15),
+        &format!("Set a hint for this window (Shift+click: every {} window)", win.app));
+    hint.connect_clicked(move |_| { let app = shift_click(); later(move || switcher::edit_hint(id, app)); });
+    let hide = flat_button("keytab-act", &line_icon(include_str!("../../ui/icons/eye-off.svg"), 15),
+        &format!("Hide this window from keytab (Shift+click: every {} window). Undo in Settings › Switcher.", win.app));
+    hide.connect_clicked(move |_| { let app = shift_click(); later(move || switcher::hide_window(id, app)); });
+    let close = flat_button("keytab-act", &line_icon(include_str!("../../ui/icons/cross.svg"), 15), if closing { "Click again to close" } else { "Close window" });
+    close.style_context().add_class("x");
+    close.connect_clicked(move |_| later(move || switcher::close_window(id)));
+    for b in [&hint, &hide, &close] { acts.pack_start(b, false, false, 0); }
+    acts
 }
 
 pub(crate) fn render(view: &View<'_>) {
@@ -476,11 +706,42 @@ pub(crate) fn render(view: &View<'_>) {
             list.set_margin_bottom(6);
             list.set_selection_mode(gtk::SelectionMode::Single);
             list.set_activate_on_single_click(true);
-            let ids: Vec<_> = view.rows.iter().map(|row| row.win.id).collect();
-            list.connect_row_activated(move |_, row| {
-                if let Some(&id) = ids.get(row.index() as usize) { switcher::activate(id); }
+            let shown: Vec<_> = view.rows.iter().filter(|row| view.search.is_some() || row.win.key.starts_with(view.typed)).collect();
+            let ids: Rc<Vec<WinId>> = Rc::new(shown.iter().map(|row| row.win.id).collect());
+            let at = {
+                let ids = ids.clone();
+                move |list: &gtk::ListBox, y: f64| list.row_at_y(y as i32).and_then(|row| ids.get(row.index() as usize).copied())
+            };
+            {
+                let ids = ids.clone();
+                list.connect_row_activated(move |_, row| {
+                    if let Some(&id) = ids.get(row.index() as usize) { later(move || switcher::activate(id)); }
+                });
+            }
+            // Hover selects (Settings > Switcher), but only when the pointer really moves.
+            list.add_events(gtk::gdk::EventMask::POINTER_MOTION_MASK | gtk::gdk::EventMask::BUTTON_PRESS_MASK);
+            let pointer = ui.pointer.clone();
+            let selected = view.selected;
+            let hover = at.clone();
+            list.connect_motion_notify_event(move |list, event| {
+                let root = event.root();
+                if pointer.replace(Some(root)) == Some(root) || !crate::settings::get().hover_select {
+                    return gtk::glib::Propagation::Proceed;
+                }
+                if let Some(id) = hover(list, event.position().1).filter(|id| Some(*id) != selected) {
+                    later(move || switcher::select(id));
+                }
+                gtk::glib::Propagation::Proceed
             });
-            for row in view.rows.iter().filter(|row| view.search.is_some() || row.win.key.starts_with(view.typed)) {
+            // Middle click closes the window, like a browser tab.
+            list.connect_button_press_event(move |list, event| {
+                if event.button() == 2 {
+                    if let Some(id) = at(list, event.position().1) { later(move || switcher::close_window(id)); }
+                    return gtk::glib::Propagation::Stop;
+                }
+                gtk::glib::Propagation::Proceed
+            });
+            for row in shown {
                 let win = row.win;
                 let item = gtk::ListBoxRow::new();
                 item.style_context().add_class("keytab-row");
@@ -497,7 +758,7 @@ pub(crate) fn render(view: &View<'_>) {
                 }
                 if view.closing == Some(win.id) { item.style_context().add_class("closing"); }
                 if view.search.is_none() { line.pack_start(&hint, false, false, 0); }
-                line.pack_start(&app_icon(&win.app, &ui.apps), false, false, 0);
+                line.pack_start(&app_icon(win.id, &win.app, &ui.apps), false, false, 0);
                 let app = label("", "keytab-app");
                 app.set_markup(&highlighted(&win.app, row.hits, 0));
                 app.set_max_width_chars(16);
@@ -505,6 +766,7 @@ pub(crate) fn render(view: &View<'_>) {
                 let title = label("", "keytab-title");
                 title.set_markup(&highlighted(clean_title(&win.title, &win.app), row.hits, win.app.chars().count() + 1));
                 line.pack_start(&title, true, true, 0);
+                line.pack_start(&row_buttons(win, view.closing == Some(win.id)), false, false, 0);
                 item.add(&line);
                 list.add(&item);
                 if view.selected == Some(win.id) { list.select_row(Some(&item)); }
@@ -538,12 +800,23 @@ pub(crate) fn render(view: &View<'_>) {
             }
             if preview {
                 if let Some(id) = view.selected {
-                    ui.content.pack_start(&thumbnail(ui.previews.get(&id), ui.window.scale_factor().clamp(1, 4)), false, false, 0);
+                    // Clicking the preview opens its window.
+                    let frame = thumbnail(ui.previews.get(&id), ui.window.scale_factor().clamp(1, 4));
+                    let click = gtk::EventBox::new();
+                    click.set_halign(gtk::Align::Center);
+                    click.set_visible_window(false);
+                    frame.style_context().add_class("keytab-clickable");
+                    click.add(&frame);
+                    click.connect_button_release_event(move |_, event| {
+                        if event.button() == 1 { later(move || switcher::activate(id)); }
+                        gtk::glib::Propagation::Stop
+                    });
+                    ui.content.pack_start(&click, false, false, 0);
                 }
             }
         }
         let card_width = ui.window.allocated_width() - ui.card.margin_start() - ui.card.margin_end();
-        render_legend(&ui.content, &footer(view), card_width - 34);
+        render_legend(&ui.content, &footer_items(view), view.edit.is_none() && view.closing.is_none(), card_width - 34);
         for child in ui.content.children() { child.show_all(); }
         ui.content.show();
         ui.card.show();
@@ -618,6 +891,23 @@ mod tests {
         view.closing = Some(1);
         assert!(footer(&view).contains("⎋ cancel"));
         assert!(!footer(&view).contains("↵ open"));
+    }
+
+    #[test]
+    fn every_footer_key_is_clickable_except_the_prompts() {
+        use super::footer_items;
+        let mut win = crate::keys::Win::new(1, "Floorp".into(), "Page".into());
+        win.key = "b".into();
+        let mut view = crate::switcher::View { rows: vec![crate::switcher::Row { win: &win, hits: &[] }], typed: "", search: None, edit: None, dom_input: true, preview: false, pinned: false, selected: Some(1), closing: None };
+        let acts = |view: &crate::switcher::View<'_>| footer_items(view).into_iter().map(|(_, act)| act).collect::<Vec<_>>();
+        assert_eq!(acts(&view), [Some("Enter"), Some("current"), Some("pin"), Some("search"), Some("HintWindow"), Some("hide"), Some("Delete"), Some("Esc")]);
+        view.closing = Some(1);
+        assert_eq!(acts(&view), [None, Some("Delete"), Some("Esc")], "the question itself isn't a button");
+        view.closing = None;
+        let search = crate::switcher::SearchView { query: "", sel: 0 };
+        view.search = Some(search);
+        assert_eq!(footer_items(&view)[0], ("Type to search".to_string(), None));
+        assert!(footer_items(&view).iter().any(|(text, act)| text == "R⇧ hints" && *act == Some("search")));
     }
 
     #[test]

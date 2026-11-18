@@ -45,6 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/HayzDev/keytab/main/install.sh | sh
 ```
 
 This installs `keytab` and `keytabctl` to `~/.local/bin`, adds the keybinds to your niri config, and starts keytab.
+An existing `~/.config/niri/keytab.kdl` is never overwritten (by the installer or by in-app updates), so custom keybinds survive.
 Press **Alt+Tab** or **Mod+Tab** (add Shift for search). The prebuilt binary is built on Fedora 44 (x86_64) and needs these runtime packages:
 
 ```sh
@@ -81,6 +82,9 @@ when Keytab opened. Ctrl can still select that active window explicitly.
 
 Hints are prefix-free. Auto hints use the app's own letters (chrome + code → `ch`, `co`). User hints win, and the auto hints rearrange around them.
 If several windows of one app share an app hint `x`, they become `x1`, `x2`, …
+A per-window hint can extend its own app's hint with a letter, such as `bs` for
+one window of an app with hint `b`. The other windows use numbered hints even
+if only one of them remains, so `b` never conflicts with `bs`.
 
 On Niri, per-window hints are saved immediately to `~/.config/keytab/window-hints.json`
 and survive Keytab updates and restarts while that same window remains open.
@@ -91,28 +95,46 @@ without losing their hint. Windows per-window hints still remain in memory.
 
 Hidden windows (Alt+H, or a row's hide button; Shift+click hides every window of the app) are kept in
 `settings.json` under `hidden`, matched by app name and exact window title, case-insensitively. A window whose
-title changes shows up again. Bring them back from Settings › Switcher › Hidden windows (Windows), or by
-deleting the entry from `settings.json` and restarting keytab (Linux).
+title changes shows up again. Bring them back from Settings › Switcher › Hidden windows.
 
 App hints are saved in `%APPDATA%\keytab\app-hints.json` on Windows and `~/.config/keytab/app-hints.json` on Linux. The file maps lowercase app name to hint.
 
-### Mouse (Windows)
+### Mouse
 
 Hovering a row selects it (and previews it while previews are on). Click a row to switch to it.
 Middle-click it to close the window. The hovered row also shows a tag button (set a hint; Shift+click
 sets one for the whole app), a hide button (Shift+click hides the whole app) and a × button. Every key in the footer is clickable, the preview opens its
-window when clicked, and the gear opens Settings. Clicks never take focus away from the window you came from.
+window when clicked, and the gear opens Settings. Hover selection only follows real pointer movement, so the
+list redrawing under a still pointer never steals the keyboard's selection. On Windows, clicks never take focus away
+from the window you came from; on niri the overlay already holds keyboard focus while it is open.
 
-### Settings and updates (Windows)
+### Settings and updates
 
-Open Settings from the gear in the switcher, by clicking the tray icon, or with `keytab --settings`. It has:
-start at login, the open key (Right Alt, Right Ctrl, Right Win, Menu or Caps Lock), the theme, hover selection,
-close confirmation, previews on by default, hidden windows, your saved app hints, and updates. Settings are saved to `%APPDATA%\keytab\settings.json`.
+Open Settings from the gear in the switcher, with `keytab --settings` (`keytabctl --settings` on Linux), or, on
+Windows, by clicking the tray icon. It has: start at login, the open key, the theme (System, Dark, Light; it applies
+to the switcher too), hover selection, close confirmation, previews on by default, hidden windows, your saved app hints,
+and updates. Settings are saved to `%APPDATA%\keytab\settings.json` on Windows and `~/.config/keytab/settings.json` on Linux.
+
+On niri, two of those live in your niri config instead, which keytab reads but never edits:
+
+- **Keybinds** replace the open-key choice. Settings lists every niri bind that runs `keytabctl` (for example an `F13`
+  key sent by a keyboard remapper, or `Mod+Tab`) and the file it is in. Change them in that file.
+- **Start at login** shows whether a `spawn-at-startup` line starts keytab, and where. The switch is read-only.
+
+The System theme follows the desktop's color scheme through the XDG settings portal
+(`org.freedesktop.appearance color-scheme`); with no preference it is dark.
 
 **Updates** come from GitHub Releases on one of two channels. **Stable** gets tagged releases. **Nightly** is the
 `nightly` prerelease, rebuilt from every push to `main`. With *Update automatically* on (the default), keytab
 checks for an update about 10 seconds after it starts, waits until the switcher is closed, then installs the update
 silently and restarts. *Check now* and *Update* in Settings do the same thing on demand. Debug builds never auto-update.
+
+On Linux an update downloads `keytab-linux-x86_64.tar.gz` with `curl`, replaces only `keytab` and `keytabctl`
+next to the running executable (staged, then renamed, so a failed update changes nothing), and restarts keytab.
+Your niri config, including `keytab.kdl` and any custom keybinds, is never touched. Linux updates need the
+x86_64 release binary in a folder you can write to (such as `~/.local/bin`). Builds from source (`cargo build`)
+never update automatically; *Check now* still shows newer releases, and a build inside a cargo `target` folder
+refuses to replace itself.
 
 ## Build
 
@@ -193,7 +215,8 @@ The panel has a translucent background, a thin lighter outline, and compositor
 blur clipped to its rounded bounds. Blur requires compositor support for
 `ext-background-effect-v1` (available on this device); GTK layer shell 0.9 or newer
 is required. The supplied layer rule disables wallpaper-only (xray) blur for Keytab.
-Escape, selecting a window, or clicking the transparent area dismisses it.
+Escape, selecting a window, or clicking the transparent area dismisses it. The settings window is an ordinary
+niri window with the same blurred glass when the compositor supports it, and an opaque card otherwise.
 
 Previews are snapshots loaded asynchronously through Niri’s PipeWire interface.
 They stay in memory and leave the clipboard untouched. Recent snapshots are reused
@@ -212,7 +235,9 @@ The GTK renderer includes app icons, custom-hint colors, and a key-symbol footer
 actions available in the current state. The resident layer has an empty pointer
 input region while hidden, including immediately after login.
 
-Quit with `keytabctl --quit` (there's no tray on Linux).
+Open settings with the gear in the switcher's footer or `keytabctl --settings`; you can bind that in your niri
+config (`Mod+Comma { spawn "~/.local/bin/keytabctl" "--settings"; }`). Quit with `keytabctl --quit`
+(there's no tray on Linux).
 
 Window list, focus and close go through `niri msg --json windows` and `niri msg action focus-window|close-window --id N`.
 
@@ -222,6 +247,11 @@ Window list, focus and close go through `niri msg --json windows` and `niri msg 
   `focus_timestamp`; older versions without it use focused-first, then Niri's order.
 - Known gap vs Windows: the Windows version handles keys from the moment you press the hotkey. On Wayland, a key typed before the overlay has focus is lost.
 - Known gap vs Windows: CapsLock still toggles caps on Wayland, because a focused app can't stop the compositor from seeing it.
+- Known gap vs Windows: no tray icon, so Settings opens from the switcher's gear or `keytabctl --settings`.
+- Known gap vs Windows: the open key and start-at-login are niri config (see Settings and updates), shown
+  read-only in Settings. A held-modifier gesture like Windows' "hold Right Alt + Right Shift" isn't available:
+  niri binds fire once per chord, so search has its own bind.
+- Known gap vs Windows: previews are snapshots refreshed every few seconds, not live thumbnails.
 
 ## Layout / porting
 
@@ -246,7 +276,9 @@ Shift is never swallowed by the hook, so the app behind just sees a bare Shift.
 
 ```
 src/
-  main.rs           Tauri wiring, `key`/`activate`/`hide` commands, --toggle/--search/--quit
+  main.rs           Tauri wiring, commands, settings window, --toggle/--search/--settings/--quit
+  settings.rs       settings.json (platform-neutral)
+  updater.rs        GitHub Releases updates (Windows installer, Linux archive)
   switcher.rs       platform-neutral state machine (abstract `Key`s), fuzzy search, hint dialogs, saved hints
   keys.rs           `Win` model + prefix-free hint assignment (pure, tested)
   platform/mod.rs   the backend contract
@@ -256,7 +288,8 @@ src/
   platform/material.c Wayland compositor blur region
 scripts/keytabctl    lightweight Linux D-Bus command client
 scripts/thumbnail.py embedded one-shot PipeWire capture helper (Python/GStreamer)
-ui/index.html       Windows UI
+ui/index.html       Windows switcher UI
+ui/settings.html    settings window (both platforms)
 ```
 
 To port to another platform or compositor:

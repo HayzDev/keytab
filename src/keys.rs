@@ -61,7 +61,14 @@ pub fn assign(wins: &mut [Win], custom: &BTreeMap<WinId, String>, apps: &BTreeMa
             let hint = apps.get(app)?;
             let n = nth.entry(app).or_default();
             *n += 1;
-            Some((if shares(app) == 1 { hint.clone() } else { format!("{hint}{n}") }, Kind::App))
+            let count = shares(app);
+            let key = if count == 1 && !custom.values().any(|k| k.starts_with(hint)) {
+                hint.clone()
+            } else {
+                let width = count.to_string().len();
+                format!("{hint}{n:0width$}")
+            };
+            Some((key, Kind::App))
         })
         .collect();
     let keys: Vec<Option<&str>> = fixed.iter().map(|f| f.as_ref().map(|(k, _)| k.as_str())).collect();
@@ -147,5 +154,9 @@ mod tests {
         // A per-window hint wins over the app hint; the one remaining Discord gets plain "x".
         assign(&mut ws, &BTreeMap::from([(2, "dd".to_string())]), &apps);
         assert_eq!(keys(&ws), [("x".into(), Kind::App), ("dd".into(), Kind::Window), ("c".into(), Kind::Auto)]);
+
+        // Keep a numbered hint when the bare app hint would swallow the override.
+        assign(&mut ws, &BTreeMap::from([(2, "xs".to_string())]), &apps);
+        assert_eq!(keys(&ws), [("x1".into(), Kind::App), ("xs".into(), Kind::Window), ("c".into(), Kind::Auto)]);
     }
 }

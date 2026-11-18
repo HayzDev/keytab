@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>keytab settings</title>
+<link rel="stylesheet" href="icons.css">
 <style>
   /* The switcher's look (index.html): acrylic blur behind a transparent, frameless window
      (win32::init_settings), with the same tint, edge, chips and footer legend on top. */
@@ -40,9 +41,18 @@
     --danger: #c62828;
     --ok: #1d7a35;
   }
+  /* Linux without compositor blur: the glass would show the desktop through unblurred. */
+  :root[data-blur=off] { --card: rgba(24, 26, 32, 0.98); }
+  :root[data-blur=off][data-scheme=light] { --card: rgba(248, 248, 251, 0.99); }
   * { box-sizing: border-box; margin: 0; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; background: transparent; overflow: hidden; user-select: none; }
   body { font: 14px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: var(--text); }
+  /* Linux: the niri keybinds that open keytab, shown read-only as key chips. */
+  .binds { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 10px; flex: none; max-width: 55%; color: var(--muted); font-size: 12.5px; }
+  .binds > span { display: inline-flex; align-items: center; gap: 4px; }
+  .switch input:disabled + i { opacity: .55; }
+  code { font: 12px "Cascadia Mono", Consolas, monospace; color: var(--text); }
 
   #card {
     height: 100%; display: flex; flex-direction: column; overflow: hidden;
@@ -199,11 +209,12 @@
   <main>
     <section class="page" data-tab="general">
       <label class="item">
-        <div class="what"><b>Start at login</b><span>Run keytab in the tray when you sign in to Windows.</span></div>
+        <div class="what"><b>Start at login</b><span id="login-note">Run keytab in the tray when you sign in to Windows.</span></div>
         <span class="switch"><input type="checkbox" id="login"><i></i></span>
       </label>
       <div class="item">
-        <div class="what"><b>Open key</b><span>Opens the switcher. Hold it and press <span class="k">R⇧</span> for search.</span></div>
+        <div class="what"><b id="hotkey-title">Open key</b><span id="hotkey-note">Opens the switcher. Hold it and press <span class="k">R⇧</span> for search.</span></div>
+        <div class="binds" id="binds" hidden></div>
         <div class="seg keys" id="hotkey">
           <button data-v="RightAlt">R Alt</button><button data-v="RightCtrl">R Ctrl</button><button data-v="RightWin">R Win</button><button data-v="Apps">Menu</button><button data-v="CapsLock">Caps</button>
         </div>
@@ -259,7 +270,7 @@
         <div class="seg" id="channel"><button data-v="stable">Stable</button><button data-v="nightly">Nightly</button></div>
       </div>
       <label class="item">
-        <div class="what"><b>Update automatically</b><span>When keytab starts, install any update from the chosen channel. keytab restarts by itself.</span></div>
+        <div class="what"><b>Update automatically</b><span id="auto-note">When keytab starts, install any update from the chosen channel. keytab restarts by itself.</span></div>
         <span class="switch"><input type="checkbox" id="auto_update"><i></i></span>
       </label>
       <div class="item">
@@ -303,6 +314,9 @@
     ['about', 'About', '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>'],
   ];
   let s = {};
+  // The `icon` protocol: http://icon.localhost/ on Windows, icon://localhost/ on Linux.
+  const ICONS = navigator.userAgent.includes('Windows') ? 'http://icon.localhost/' : 'icon://localhost/';
+  let systemScheme = null;  // the desktop's preference, where matchMedia can't see it (Linux)
   let update = null;
   let tab = 'general';
 
@@ -333,7 +347,7 @@
   // ---- theme ----
   const light = matchMedia('(prefers-color-scheme: light)');
   function applyTheme() {
-    document.documentElement.dataset.scheme = !s.theme || s.theme === 'system' ? (light.matches ? 'light' : 'dark') : s.theme;
+    document.documentElement.dataset.scheme = !s.theme || s.theme === 'system' ? (systemScheme ?? (light.matches ? 'light' : 'dark')) : s.theme;
   }
   light.onchange = applyTheme;
   applyTheme();
@@ -375,7 +389,7 @@
     };
     if (a.icon == null) return mono();
     const img = el('img', 'icon');
-    img.src = `http://icon.localhost/${a.icon}`;
+    img.src = `${ICONS}${a.icon}`;
     img.onerror = () => img.replaceWith(mono());
     return img;
   }
@@ -579,12 +593,36 @@
   document.querySelectorAll('[data-href]').forEach(a => a.onclick = () => invoke('open_external', { target: a.dataset.href }));
   $('config').onclick = () => invoke('open_external', { target: 'config' });
 
+  // Linux (niri): keybinds and login start live in the niri config, which keytab reads but
+  // never edits, so both are shown read-only with where to change them.
+  function linuxGeneral(v) {
+    const file = f => `<code>${esc(f.replace(/^\/home\/[^/]+/, '~'))}</code>`;
+    $('login').disabled = true;
+    $('login-note').innerHTML = v.autostart_source
+      ? `niri starts keytab at login: <code>spawn-at-startup</code> in ${file(v.autostart_source)}.`
+      : 'Not started at login. Add <code>spawn-at-startup "~/.local/bin/keytab"</code> to your niri config.';
+    $('hotkey').hidden = true;
+    $('hotkey-title').textContent = 'Keybinds';
+    const where = [...new Set(v.binds.map(b => b.file))];
+    $('hotkey-note').innerHTML = (where.length ? `Set in ${where.map(file).join(', ')}.` : 'No niri keybind runs keytabctl yet.')
+      + ' keytab never edits your niri config. <code>keytabctl --settings</code> opens this window.';
+    const what = { open: 'open', search: 'search', settings: 'settings' };
+    $('binds').innerHTML = v.binds.map(b => `<span>${b.keys.split('+').map(k => `<span class="k">${esc(k)}</span>`).join('')}${what[b.action]}</span>`).join('');
+    $('binds').hidden = !v.binds.length;
+  }
+  const esc = t => String(t).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
   async function load() {
     const v = await invoke('get_settings');
     s = v.settings;
     $('version').textContent = `keytab ${v.version}`;
     $('about-version').textContent = `Version ${v.version}`;
     status(`You have ${v.version}.`);
+    systemScheme = v.system_scheme ?? null;
+    if (!v.blur) document.documentElement.dataset.blur = 'off';
+    if (!v.auto_update_allowed) {
+      $('auto-note').textContent = 'This build was compiled from source, so it never updates by itself. Check now still finds releases.';
+    }
+    if (v.platform === 'linux') linuxGeneral(v);
     $('login').checked = v.autostart;
     for (const id of TOGGLES) $(id).checked = s[id];
     paints.forEach(p => p());

@@ -1,0 +1,8 @@
+.keytab-icon {
+  display: inline-block;
+  flex: none;
+  width: var(--size);
+  height: var(--size);
+  background: currentColor;
+  mask: var(--icon) center / contain no-repeat;
+}

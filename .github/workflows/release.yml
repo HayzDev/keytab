@@ -112,7 +112,7 @@ jobs:
           short=${GITHUB_SHA::7}
           cat > notes.md <<NOTES
           Built automatically from \`main\`. Newer than the latest stable release, and may break.
-          Switch to it in keytab: tray icon → Settings → Updates → Release channel → Nightly.
+          Switch to it in keytab: Settings → Updates → Release channel → Nightly (Windows: click the tray icon; Linux: the gear in the switcher or \`keytabctl --settings\`).
 
           Commit: ${GITHUB_SHA}
           NOTES

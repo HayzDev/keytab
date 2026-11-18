@@ -1,7 +1,8 @@
 #!/bin/sh
 # keytab installer for Linux (niri):
 #   curl -fsSL https://raw.githubusercontent.com/HayzDev/keytab/main/install.sh | sh
-# Installs keytab and keytabctl to ~/.local/bin, adds the niri keybinds, and starts keytab.
+# Installs keytab and keytabctl to ~/.local/bin, adds the niri keybinds (unless you already
+# have a keytab.kdl), and starts keytab.
 # Run it from an extracted release archive to install those files instead of downloading.
 set -eu
 
@@ -23,7 +24,13 @@ fi
 "$bin/keytabctl" --quit 2>/dev/null || true
 install -Dm755 "$src/keytab" "$bin/keytab"
 install -Dm755 "$src/keytabctl" "$bin/keytabctl"
-install -Dm644 "$src/niri.kdl" "$niri_dir/keytab.kdl"
+# Never overwrite an existing keytab.kdl: it may hold your own keybinds (an F13 or other
+# custom open key). In-app updates never touch it either.
+if [ -e "$niri_dir/keytab.kdl" ]; then
+    echo "Kept your existing $niri_dir/keytab.kdl (the default is in the release archive as niri.kdl)."
+else
+    install -Dm644 "$src/niri.kdl" "$niri_dir/keytab.kdl"
+fi
 
 config="$niri_dir/config.kdl"
 if [ -f "$config" ] && ! grep -q 'include "keytab.kdl"' "$config"; then

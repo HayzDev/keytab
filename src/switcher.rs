@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use tauri::AppHandle;
-#[cfg(windows)]
 use tauri::Emitter;
 
 const MAX_HINT: usize = 4;
@@ -599,7 +598,6 @@ fn hide_in(s: &mut State, id: WinId, app: bool) {
         settings.hidden.push(rule.clone());
         crate::settings::set(settings.clone());
         // The settings window, if open, lists the new entry.
-        #[cfg(windows)]
         if let Some(app) = APP.get() { let _ = app.emit("settings", settings); }
     }
     s.closing = None;
@@ -978,13 +976,24 @@ fn on_edit_key(s: &mut State, key: Key) -> bool {
     true
 }
 
-/// User hints must stay prefix-free against each other (auto keys re-flow around them).
+/// A same-app window can extend the app hint with a letter, outside its numbered hints.
+fn extends_app_hint(window: &str, app: &str) -> bool {
+    window.strip_prefix(app).and_then(|suffix| suffix.as_bytes().first()).is_some_and(u8::is_ascii_lowercase)
+}
+
+/// Assigned hints must stay prefix-free (auto keys re-flow around custom hints).
 fn clash(wins: &[Win], custom: &BTreeMap<WinId, String>, app_hints: &BTreeMap<String, String>, e: &Edit) -> Option<String> {
     if e.keys.is_empty() { return None; }
     let app = e.app.to_lowercase();
     let name = |id: &WinId| wins.iter().find(|w| w.id == *id).map_or("another window".into(), |w| w.app.clone());
-    let windows = custom.iter().filter(|(id, _)| !(e.scope == Scope::Window && **id == e.id));
-    let apps = app_hints.iter().filter(|(a, _)| !(e.scope == Scope::App && **a == app));
+    let windows = custom.iter().filter(|(id, k)| match e.scope {
+        Scope::Window => **id != e.id,
+        Scope::App => !extends_app_hint(k, &e.keys)
+            || !wins.iter().any(|w| w.id == **id && w.app.eq_ignore_ascii_case(&app)),
+    });
+    let apps = app_hints.iter().filter(|(a, k)| {
+        **a != app || (e.scope == Scope::Window && !extends_app_hint(&e.keys, k))
+    });
     windows
         .map(|(id, k)| (name(id), k))
         .chain(apps.map(|(a, k)| {
@@ -1007,6 +1016,25 @@ mod tests {
     use super::{rank, Key};
     use crate::keys::Win;
     static STATE_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn window_hint_can_extend_its_own_app_hint() {
+        let wins = [Win::new(1, "Floorp".into(), String::new())];
+        let apps = [("floorp".into(), "b".into())].into();
+        let custom = Default::default();
+        let mut edit = super::Edit {
+            scope: super::Scope::Window, id: 1, app: "Floorp".into(), title: String::new(),
+            current: String::new(), kind: super::Kind::App, keys: "bs".into(), error: None,
+        };
+        assert!(super::clash(&wins, &custom, &apps, &edit).is_none());
+        for keys in ["b", "b1"] {
+            edit.keys = keys.into();
+            assert!(super::clash(&wins, &custom, &apps, &edit).is_some());
+        }
+        edit.keys = "bs".into();
+        edit.app = "Other".into();
+        assert!(super::clash(&wins, &custom, &apps, &edit).is_some());
+    }
 
     #[test]
     fn fuzzy() {
