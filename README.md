@@ -1,7 +1,24 @@
 # keytab
 
+[![Latest release](https://img.shields.io/github/v/release/HayzDev/keytab?label=download)](https://github.com/HayzDev/keytab/releases/latest)
+[![CI](https://github.com/HayzDev/keytab/actions/workflows/ci.yml/badge.svg)](https://github.com/HayzDev/keytab/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 A keyboard-first Alt-Tab replacement (Rust + Tauri 2). Open it, type a window's letter(s), and that window gets focus.
 Inspired by [Adam Basis](https://www.youtube.com/@AdamBasis)'s alt-tab videos.
+
+<p align="center">
+  <img src="docs/screenshots/hints.png" alt="keytab open over the desktop: every window has a short letter hint" width="720">
+</p>
+
+Press **Right Alt**, type the letters next to a window, done. No cycling, no hunting through thumbnails.
+
+| | |
+|---|---|
+| <img src="docs/screenshots/narrow.png" alt="Typing E narrows the list to the two Explorer windows" width="420"><br>**Type to narrow.** Windows of the same app get hints like `EP` and `EX`; one letter filters, the next picks. | <img src="docs/screenshots/search.png" alt="Fuzzy search for char finds Character Map" width="420"><br>**Fuzzy search.** Right Alt + Right Shift, then type any part of an app name or window title. |
+| <img src="docs/screenshots/preview.png" alt="Holding Left Shift shows a live preview of the selected window" width="420"><br>**Live previews.** Hold Left Shift to see the selected window before switching. | **Also:** custom hints per window or per app, close or hide windows from the switcher, mouse support, light/dark themes, start at login, and automatic updates. |
+
+<sub>Screenshots were recorded in a clean Windows Sandbox with the scripts in [scripts/demo](scripts/demo).</sub>
 
 ## Install
 

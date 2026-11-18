@@ -1,8 +1,11 @@
-# Records the README screenshots and demo video in a clean Windows Sandbox.
+# Records the README screenshots in a clean Windows Sandbox: guest.ps1 sets up sample apps,
+# then plays scene.ps1 with scripted keystrokes while ffmpeg records the screen.
 #   cargo build --release --features demo
-#   pwsh scripts/demo/record.ps1 [-Scene probe|demo]
-# Output: target/demo/out (raw.mkv, marks.txt). Needs Windows Sandbox and ffmpeg 8.1+
-# (for the gfxcapture source), on PATH or given with -FFmpeg.
+#   pwsh scripts/demo/record.ps1 [-Scene probe|demo] [-Exe path] [-FFmpeg path]
+# Needs Windows Sandbox and ffmpeg 8.1+ (for the gfxcapture source).
+# Output in target/demo/out: raw.mkv, and marks.txt with each scene step's time. The video
+# starts about 2.5 s before the marks; take stills with ffmpeg -ss <mark + offset> -i raw.mkv -frames:v 1 x.png
+# and crop them into docs/screenshots.
 param([string]$Scene = 'demo', [int]$TimeoutSec = 600, [string]$Exe, [string]$FFmpeg)
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path "$PSScriptRoot/../.."
