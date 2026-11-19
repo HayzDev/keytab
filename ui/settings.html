@@ -228,11 +228,6 @@
     </section>
 
     <section class="page" data-tab="switcher" hidden>
-      <h2>Mouse</h2>
-      <label class="item">
-        <div class="what"><b>Hovering selects</b><span>The window under the mouse gets selected and previewed. Click a row to switch, middle-click to close.</span></div>
-        <span class="switch"><input type="checkbox" id="hover_select"><i></i></span>
-      </label>
       <h2>Windows</h2>
       <label class="item">
         <div class="what"><b>Confirm before closing</b><span><span class="k">⌦</span>, the × button and middle-click need a second press.</span></div>
@@ -368,7 +363,7 @@
     return paint;
   }
   const paints = [seg('theme', 'theme'), seg('hotkey', 'hotkey'), seg('channel', 'channel', () => check())];
-  const TOGGLES = ['hover_select', 'confirm_close', 'previews_on', 'auto_update'];
+  const TOGGLES = ['confirm_close', 'previews_on', 'auto_update'];
   for (const id of TOGGLES) $(id).onchange = () => { s[id] = $(id).checked; save(); };
   $('login').onchange = async () => { $('login').checked = await invoke('set_login', { on: $('login').checked }); };
 

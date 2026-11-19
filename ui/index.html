@@ -75,14 +75,14 @@
   #list { max-height: 620px; overflow-y: auto; scrollbar-width: none; padding: 6px; display: flex; flex-direction: column; gap: 1px; }
   #list:empty { display: none; }
   .empty { padding: 18px 12px; color: var(--muted); text-align: center; }
-  /* With "hover selects" on (the default), hovering moves the selection, so the selection
-     stays the only highlighted row. Off, hovered rows get a faint wash instead. */
+  /* Two highlights: the keyboard's selection, and a faint wash on the row under the mouse.
+     Hovering never moves the selection, so opening under a resting pointer changes nothing. */
   .row {
     position: relative; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px;
     padding: 6px 10px; border: 0; border-radius: 6px; background: none;
     color: inherit; font: inherit; text-align: left; cursor: default;
   }
-  .no-hover-select .row:hover:not(.sel) { background: var(--field); }
+  .row:hover:not(.sel) { background: var(--field); }
   .row.sel { background: var(--sel); }
   /* Row buttons (set hint, close) appear on the row under the mouse. */
   .acts { display: none; flex: none; gap: 2px; margin-right: -4px; }
@@ -432,19 +432,6 @@
   }).then(() => invoke('ready'));
 
   // ---- mouse ----
-  // Hover selects the row under the pointer, but only when the pointer really moves:
-  // re-renders and scrolling fire mousemove under a still pointer, and that mustn't take the
-  // selection away from the keyboard.
-  let current = null, lastPointer = '';
-  $('list').addEventListener('mousemove', e => {
-    const at = `${e.screenX},${e.screenY}`;
-    if (at === lastPointer) return;
-    lastPointer = at;
-    const row = e.target.closest('.row');
-    if (!prefs.hover_select || !row || +row.dataset.id === current) return;
-    current = +row.dataset.id;
-    invoke('select', { id: current });
-  });
   $('foot').onclick = e => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'settings') invoke('open_settings');
@@ -455,11 +442,10 @@
   addEventListener('contextmenu', e => e.preventDefault());
 
   // Settings (settings.html) that change how this page looks or behaves.
-  let prefs = { theme: 'system', hover_select: true };
+  let prefs = { theme: 'system' };
   const light = matchMedia('(prefers-color-scheme: light)');
   function applyPrefs() {
     document.documentElement.dataset.scheme = prefs.theme === 'system' ? (light.matches ? 'light' : 'dark') : prefs.theme;
-    document.body.classList.toggle('no-hover-select', !prefs.hover_select);
   }
   light.onchange = applyPrefs;
   applyPrefs();

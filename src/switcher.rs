@@ -511,17 +511,6 @@ pub fn set_previews_pinned(on: bool) {
 
 // ---- mouse -----------------------------------------------------------------------
 
-/// Hover: select this row (and preview it) without opening it.
-#[cfg_attr(not(windows), allow(dead_code))]
-pub fn select(id: WinId) {
-    let mut s = STATE.lock().unwrap();
-    if !s.open || s.edit.is_some() { return; }
-    if select_row(&mut s, id) {
-        if s.closing.is_some_and(|c| c != id) { s.closing = None; }
-        emit(&s);
-    }
-}
-
 /// Select a visible row by window id, in either mode. True if the selection changed.
 fn select_row(s: &mut State, id: WinId) -> bool {
     let before = (s.selected, s.search.as_ref().map(|q| q.sel));
@@ -1357,7 +1346,7 @@ mod tests {
     }
 
     #[test]
-    fn mouse_hover_selects_and_close_button_needs_two_clicks() {
+    fn close_button_needs_two_clicks_and_selects_its_row() {
         let _guard = STATE_TEST.lock().unwrap();
         let mut s = super::STATE.lock().unwrap();
         super::close(&mut s);
@@ -1365,19 +1354,15 @@ mod tests {
         s.wins = vec![Win::new(1, "Code".into(), "Editor".into()), Win::new(2, "Paint".into(), "Art".into()), Win::new(3, "Mail".into(), "Inbox".into())];
         for (win, hint) in s.wins.iter_mut().zip(["c", "p", "m"]) { win.key = hint.into(); }
         drop(s);
-        super::select(3);
-        assert_eq!(super::selected_hint(&super::STATE.lock().unwrap()), Some(3));
         super::press("search");
-        super::select(1);
+        super::close_window(2);
         {
             let s = super::STATE.lock().unwrap();
+            assert_eq!(s.closing, Some(2), "the first click only arms");
             let q = s.search.as_ref().unwrap();
-            assert_eq!(s.wins[q.hits[q.sel].0].id, 1, "hover follows search results too");
+            assert_eq!(s.wins[q.hits[q.sel].0].id, 2, "the armed row is selected, so Del confirms it");
         }
-        super::close_window(2);
-        assert_eq!(super::STATE.lock().unwrap().closing, Some(2), "the first click only arms");
-        super::select(3);
-        assert!(super::STATE.lock().unwrap().closing.is_none(), "hovering another row disarms");
+        super::STATE.lock().unwrap().closing = None;
         super::press("search");
         super::press("pin");
         let mut s = super::STATE.lock().unwrap();

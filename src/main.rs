@@ -44,11 +44,6 @@ fn layout(card: Option<(f64, f64, f64, f64)>, thumbs: Vec<(keys::WinId, f64, f64
 // ---- mouse (Windows overlay; the Linux GTK overlay calls `switcher` directly) -------------
 
 #[tauri::command]
-fn select(id: keys::WinId) {
-    switcher::select(id);
-}
-
-#[tauri::command]
 fn close_window(id: keys::WinId) {
     switcher::close_window(id);
 }
@@ -387,13 +382,13 @@ fn main() {
 
     #[cfg(windows)]
     let builder = builder.invoke_handler(tauri::generate_handler![
-        activate, hide, key, ready, layout, select, close_window, edit_hint, hide_window, press, get_settings, save_settings,
+        activate, hide, key, ready, layout, close_window, edit_hint, hide_window, press, get_settings, save_settings,
         set_login, hint_apps, hidden_windows, unhide_window, check_app_hint, set_app_hint, remove_app_hint, open_external,
         open_settings, check_update, install_update
     ]);
     #[cfg(not(windows))]
     let builder = builder.invoke_handler(tauri::generate_handler![
-        activate, hide, key, ready, select, close_window, edit_hint, hide_window, press, get_settings, save_settings,
+        activate, hide, key, ready, close_window, edit_hint, hide_window, press, get_settings, save_settings,
         set_login, hint_apps, hidden_windows, unhide_window, check_app_hint, set_app_hint, remove_app_hint, open_external,
         open_settings, check_update, install_update
     ]);

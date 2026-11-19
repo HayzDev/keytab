@@ -36,8 +36,6 @@ pub struct Settings {
     pub theme: String,
     /// The key that opens the switcher (Windows): "RightAlt", "RightCtrl", "RightWin", "Apps", "CapsLock".
     pub hotkey: String,
-    /// Moving the mouse over a row selects it (and previews it).
-    pub hover_select: bool,
     /// Del and the row's close button ask before closing a window.
     pub confirm_close: bool,
     /// Previews start pinned on, as if Ctrl+P was pressed.
@@ -55,7 +53,6 @@ impl Default for Settings {
         Settings {
             theme: "system".into(),
             hotkey: "RightAlt".into(),
-            hover_select: true,
             confirm_close: true,
             previews_on: false,
             channel: Channel::default(),
@@ -123,9 +120,9 @@ mod tests {
 
     #[test]
     fn missing_fields_take_defaults() {
-        let s: Settings = serde_json::from_str(r#"{"channel":"nightly","hover_select":false}"#).unwrap();
+        // hover_select was removed; files that still have it must load.
+        let s: Settings = serde_json::from_str(r#"{"channel":"nightly","hover_select":true}"#).unwrap();
         assert_eq!(s.channel, Channel::Nightly);
-        assert!(!s.hover_select);
         assert_eq!(s.hotkey, "RightAlt");
         assert!(s.confirm_close && s.auto_update);
         assert!(s.hidden.is_empty());

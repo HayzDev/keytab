@@ -22,9 +22,6 @@ struct Ui {
     entry: gtk::Entry,
     updating_query: Rc<Cell<bool>>,
     searching: bool,
-    /// Where the pointer last moved (root coordinates): rebuilding the list under a still
-    /// pointer must not move the selection (hover selects only on real movement).
-    pointer: Rc<Cell<Option<(f64, f64)>>>,
 }
 
 thread_local! {
@@ -80,7 +77,7 @@ window#keytab { background-color: transparent; }
 #keytab .keytab-preview > border { border: none; }
 #keytab .keytab-preview.unavailable { border: none; }
 #keytab .keytab-monogram { background: #3b617d; border-radius: 5px; font-size: 12px; font-weight: bold; color: white; }
-#keytab.no-hover-select .keytab-row:hover:not(:selected) { background: rgba(255,255,255,0.06); }
+#keytab .keytab-row:hover:not(:selected) { background: rgba(255,255,255,0.06); }
 
 /* Mouse: row buttons (hint, hide, close) on the hovered row, clickable footer keys, gear. */
 #keytab button.keytab-act, #keytab button.keytab-action, #keytab button.keytab-gear {
@@ -108,7 +105,7 @@ window#keytab { background-color: transparent; }
 #keytab.light button.keytab-action, #keytab.light button.keytab-gear { color: #55555f; }
 #keytab.light .keytab-row:selected { background: rgba(47,107,255,0.16); }
 #keytab.light .keytab-row.closing { background: rgba(220,50,50,0.13); }
-#keytab.light.no-hover-select .keytab-row:hover:not(:selected) { background: rgba(0,0,0,0.04); }
+#keytab.light .keytab-row:hover:not(:selected) { background: rgba(0,0,0,0.04); }
 #keytab.light .keytab-hint.window, #keytab.light .keytab-hint.app, #keytab.light .keytab-slot.on { color: #c98a00; }
 #keytab.light .keytab-slot.on { border-color: #c98a00; }
 #keytab.light .keytab-row:selected .keytab-hint { background-color: #2f6bff; color: #ffffff; }
@@ -217,7 +214,7 @@ pub(crate) fn init(window: &gtk::Window) {
         UI.with(|ui| { if let Some(ui) = ui.borrow_mut().as_mut() { ui.right_shift = false; } });
         gtk::glib::Propagation::Proceed
     });
-    UI.with(|ui| *ui.borrow_mut() = Some(Ui { window: window.clone(), card, content, previews: BTreeMap::new(), capture: None, capture_running: false, attempted: BTreeMap::new(), apps: gtk::gio::AppInfo::all(), right_shift: false, search_header, entry, updating_query, searching: false, pointer: Rc::new(Cell::new(None)) }));
+    UI.with(|ui| *ui.borrow_mut() = Some(Ui { window: window.clone(), card, content, previews: BTreeMap::new(), capture: None, capture_running: false, attempted: BTreeMap::new(), apps: gtk::gio::AppInfo::all(), right_shift: false, search_header, entry, updating_query, searching: false }));
     apply_settings();
 }
 
@@ -234,7 +231,6 @@ pub(crate) fn apply_settings() {
         let Some(ui) = ui.borrow().as_ref().map(|ui| ui.window.clone()) else { return };
         let style = ui.style_context();
         if light { style.add_class("light") } else { style.remove_class("light") }
-        if s.hover_select { style.remove_class("no-hover-select") } else { style.add_class("no-hover-select") }
     });
     switcher::refresh();
 }
@@ -718,21 +714,9 @@ pub(crate) fn render(view: &View<'_>) {
                     if let Some(&id) = ids.get(row.index() as usize) { later(move || switcher::activate(id)); }
                 });
             }
-            // Hover selects (Settings > Switcher), but only when the pointer really moves.
+            // The mouse only highlights the row under it (CSS :hover); the selection belongs to
+            // the keyboard, so opening the switcher under a resting pointer changes nothing.
             list.add_events(gtk::gdk::EventMask::POINTER_MOTION_MASK | gtk::gdk::EventMask::BUTTON_PRESS_MASK);
-            let pointer = ui.pointer.clone();
-            let selected = view.selected;
-            let hover = at.clone();
-            list.connect_motion_notify_event(move |list, event| {
-                let root = event.root();
-                if pointer.replace(Some(root)) == Some(root) || !crate::settings::get().hover_select {
-                    return gtk::glib::Propagation::Proceed;
-                }
-                if let Some(id) = hover(list, event.position().1).filter(|id| Some(*id) != selected) {
-                    later(move || switcher::select(id));
-                }
-                gtk::glib::Propagation::Proceed
-            });
             // Middle click closes the window, like a browser tab.
             list.connect_button_press_event(move |list, event| {
                 if event.button() == 2 {

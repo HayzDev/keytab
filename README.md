@@ -101,18 +101,18 @@ App hints are saved in `%APPDATA%\keytab\app-hints.json` on Windows and `~/.conf
 
 ### Mouse
 
-Hovering a row selects it (and previews it while previews are on). Click a row to switch to it.
+The mouse has its own faint highlight and never moves the keyboard's selection, so opening keytab under a
+resting pointer selects nothing. Click a row to switch to it.
 Middle-click it to close the window. The hovered row also shows a tag button (set a hint; Shift+click
 sets one for the whole app), a hide button (Shift+click hides the whole app) and a × button. Every key in the footer is clickable, the preview opens its
-window when clicked, and the gear opens Settings. Hover selection only follows real pointer movement, so the
-list redrawing under a still pointer never steals the keyboard's selection. On Windows, clicks never take focus away
+window when clicked, and the gear opens Settings. On Windows, clicks never take focus away
 from the window you came from; on niri the overlay already holds keyboard focus while it is open.
 
 ### Settings and updates
 
 Open Settings from the gear in the switcher, with `keytab --settings` (`keytabctl --settings` on Linux), or, on
 Windows, by clicking the tray icon. It has: start at login, the open key, the theme (System, Dark, Light; it applies
-to the switcher too), hover selection, close confirmation, previews on by default, hidden windows, your saved app hints,
+to the switcher too), close confirmation, previews on by default, hidden windows, your saved app hints,
 and updates. Settings are saved to `%APPDATA%\keytab\settings.json` on Windows and `~/.config/keytab/settings.json` on Linux.
 
 On niri, two of those live in your niri config instead, which keytab reads but never edits:
