@@ -62,6 +62,7 @@ All downloads are on the [Releases page](https://github.com/HayzDev/keytab/relea
 |---|---|
 | **Right Alt** (Windows) / your niri bind | open / close |
 | hold Right Alt + **Right Shift** / `keytab --search` | open in fuzzy search |
+| hold Right Alt + **Enter** (Windows) | like Alt+Tab: selects the previous window, each Enter goes further back, Shift+Enter goes forward, releasing Right Alt switches |
 | letters | focus the window with that hint (two letters when first letters clash) |
 | **Right Shift** (while open) | switch to search mode; press again to go back to hints |
 | `/` | switch from hints to search mode |

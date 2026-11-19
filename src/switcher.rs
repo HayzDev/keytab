@@ -118,6 +118,8 @@ pub(crate) struct Edit {
 struct State {
     open: bool,
     activate_held: bool,
+    /// Enter was pressed with Activate held (Alt-Tab style): releasing Activate switches.
+    cycling: bool,
     alt_held: bool,
     alt_swallowed: bool,
     preview_held: bool,
@@ -144,6 +146,7 @@ struct State {
 static STATE: Mutex<State> = Mutex::new(State {
     open: false,
     activate_held: false,
+    cycling: false,
     alt_held: false,
     alt_swallowed: false,
     preview_held: false,
@@ -453,6 +456,7 @@ fn open_search(s: &mut State) {
 
 fn close(s: &mut State) {
     s.open = false;
+    s.cycling = false;
     s.preview_held = false;
     if !platform::GLOBAL_INPUT {
         s.alt_held = false;
@@ -665,6 +669,9 @@ pub fn on_key(key: Key, down: bool) -> bool {
         Key::Activate => {
             if down && !s.activate_held {
                 if s.open { close(&mut s) } else { open(&mut s) }
+            } else if !down && s.cycling {
+                s.cycling = false;
+                if let Some(id) = selection(&s) { switch_to(&mut s, id); }
             }
             s.activate_held = down;
             return true;
@@ -674,7 +681,7 @@ pub fn on_key(key: Key, down: bool) -> bool {
         Key::Search => {
             let was_held = std::mem::replace(&mut s.search_held, down);
             let pressed = down && !was_held;
-            if !pressed {
+            if !pressed || s.cycling {
                 return s.open;
             }
             if s.activate_held || (s.open && s.search.is_none() && s.edit.is_none()) {
@@ -712,6 +719,18 @@ pub fn on_key(key: Key, down: bool) -> bool {
             return false;
         }
         _ => {}
+    }
+    // Activate+Enter works like Alt-Tab: the first Enter keeps the previous window selected
+    // (Shift: the oldest), each further Enter steps back in history (Shift: forward), and
+    // releasing Activate switches.
+    if key == Key::Enter && down && s.activate_held && s.edit.is_none() {
+        if !s.open {
+            open(&mut s);
+            if !s.open { return true; }
+        }
+        let back = !(s.preview_held || s.search_held);
+        cycle(&mut s, back);
+        return true;
     }
     if !s.open || !down {
         return false;
@@ -815,6 +834,24 @@ fn ordered_hints(s: &State) -> Vec<&Win> {
 }
 
 /// The selected window in either mode.
+/// One Activate+Enter press: see on_key.
+fn cycle(s: &mut State, back: bool) {
+    s.closing = None;
+    let rows: Vec<WinId> = match &s.search {
+        Some(q) => q.hits.iter().map(|(i, _)| s.wins[*i].id).collect(),
+        None => ordered_hints(s).into_iter().filter(|w| w.key.starts_with(&s.typed)).map(|w| w.id).collect(),
+    };
+    let first = !std::mem::replace(&mut s.cycling, true);
+    if rows.is_empty() || (first && back) {
+        emit(s);
+        return;
+    }
+    let at = selection(s).and_then(|id| rows.iter().position(|r| *r == id)).unwrap_or(0);
+    let next = if first { rows.len() - 1 } else if back { (at + 1) % rows.len() } else { (at + rows.len() - 1) % rows.len() };
+    select_row(s, rows[next]);
+    emit(s);
+}
+
 fn selection(s: &State) -> Option<WinId> {
     s.search.as_ref().map_or_else(|| selected_hint(s), |q| q.hits.get(q.sel).map(|(i, _)| s.wins[*i].id))
 }
@@ -1103,6 +1140,39 @@ mod tests {
         super::set_query("no such window".into());
         assert!(super::STATE.lock().unwrap().search.as_ref().unwrap().hits.is_empty());
         super::close(&mut super::STATE.lock().unwrap());
+    }
+
+    #[test]
+    fn activate_enter_cycles_like_alt_tab() {
+        let _guard = STATE_TEST.lock().unwrap();
+        let mut s = super::STATE.lock().unwrap();
+        super::close(&mut s);
+        s.open = true;
+        s.activate_held = true;
+        s.wins = (1..=3).map(|id| Win::new(id, "App".into(), format!("w{id}"))).collect();
+        for (w, key) in s.wins.iter_mut().zip(["a", "s", "d"]) { w.key = key.into(); }
+        s.active = Some(1);
+        drop(s);
+        let sel = || super::selection(&super::STATE.lock().unwrap());
+        let mut press = |shift: bool| {
+            super::STATE.lock().unwrap().preview_held = shift;
+            assert!(super::on_key(Key::Enter, true));
+            assert!(super::STATE.lock().unwrap().open, "Enter with Activate held never switches");
+            sel()
+        };
+        assert_eq!(press(false), Some(2), "first Enter: the previous window");
+        assert_eq!(press(false), Some(3));
+        assert_eq!(press(false), Some(1), "wraps around");
+        assert_eq!(press(true), Some(3), "Shift goes the other way");
+        super::close(&mut super::STATE.lock().unwrap());
+        super::STATE.lock().unwrap().open = true;
+        super::STATE.lock().unwrap().wins = (1..=3).map(|id| { let mut w = Win::new(id, "App".into(), String::new()); w.key = format!("{id}"); w }).collect();
+        super::STATE.lock().unwrap().active = Some(1);
+        assert_eq!(press(true), Some(3), "first Shift+Enter: the oldest window");
+        let mut s = super::STATE.lock().unwrap();
+        s.activate_held = false;
+        s.preview_held = false;
+        super::close(&mut s);
     }
 
     #[test]
