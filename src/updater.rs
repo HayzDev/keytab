@@ -26,8 +26,6 @@ const ASSET: &str = "keytab-setup.exe";
 const ASSET: &str = "keytab-linux-x86_64.tar.gz";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-#[cfg(windows)]
-const DETACHED_PROCESS: u32 = 0x0000_0008;
 
 /// The channel and commit this binary was built from (set by the release workflow).
 /// Local builds are "dev".
@@ -191,7 +189,9 @@ pub fn install(update: &Update) -> Result<(), String> {
     );
     Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", &script])
-        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+        // Not DETACHED_PROCESS: PowerShell 5.1 exits without running anything when it has no
+        // console, so keytab would quit and never come back. A hidden console is enough.
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map_err(|e| format!("couldn't start the installer: {e}"))?;
     Ok(())
