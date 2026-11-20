@@ -541,7 +541,12 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             let key = translate(kb.vkCode);
             // Shift always passes through: a bare Shift is harmless to the app behind, and
             // swallowing it would hide it from GetAsyncKeyState (`|` detection).
-            if on_key(key, down) && !matches!(key, Key::Preview | Key::Search) {
+            // If Windows saw the hotkey go down without us (pressed while keytab was starting,
+            // or let through by a hook timeout), let its release through too, or the key stays
+            // stuck down for every app and every later press of it is swallowed as well.
+            // The hook runs before the key state updates, so this is the state before this event.
+            let leaked = key == Key::Activate && !down && GetAsyncKeyState(kb.vkCode as i32) < 0;
+            if on_key(key, down) && !leaked && !matches!(key, Key::Preview | Key::Search) {
                 return LRESULT(1);
             }
         }
