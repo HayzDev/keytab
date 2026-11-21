@@ -83,10 +83,45 @@ unsafe fn info(h: HWND, skip_pid: u32) -> Option<Win> {
     let title = String::from_utf16_lossy(&buf[..n as usize]);
     // UWP apps all live in ApplicationFrameHost; their title is the better name.
     let app = match exe_path(pid) {
-        Some(p) if !p.to_lowercase().ends_with("\\applicationframehost.exe") => app_name(&p),
+        Some(p) if !p.to_lowercase().ends_with("\\applicationframehost.exe") => web_app_name(h).unwrap_or_else(|| app_name(&p)),
         _ => title.clone(),
     };
     Some(Win::new(h.0 as WinId, app, title))
+}
+
+/// An installed web app (PWA) runs in its browser's process, so the exe would call it "Vivaldi"
+/// and it would share Vivaldi's app hint. Chromium browsers give PWA windows their own
+/// AppUserModelID ("Vivaldi._crx_<id>"); Start's Apps folder knows its name ("Claude Duet").
+unsafe fn web_app_name(h: HWND) -> Option<String> {
+    use windows::Win32::Foundation::PROPERTYKEY;
+    use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
+    use windows::Win32::UI::Shell::{FOLDERID_AppsFolder, IShellItem, SHCreateItemInKnownFolder, KF_FLAG_DEFAULT, SIGDN_NORMALDISPLAY};
+    const PKEY_APP_USER_MODEL_ID: PROPERTYKEY = PROPERTYKEY { fmtid: windows::core::GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3), pid: 5 };
+    static CACHE: Mutex<BTreeMap<String, Option<String>>> = Mutex::new(BTreeMap::new());
+
+    let store: IPropertyStore = SHGetPropertyStoreForWindow(h).ok()?;
+    let id = store.GetValue(&PKEY_APP_USER_MODEL_ID).ok()?.to_string();
+    if !id.contains("._crx_") {
+        return None;
+    }
+    if let Some(name) = CACHE.lock().unwrap().get(&id) {
+        return name.clone();
+    }
+    // Already-initialized (either apartment) is fine; the shell item just needs COM.
+    let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    let wide: Vec<u16> = id.encode_utf16().chain([0]).collect();
+    let name = SHCreateItemInKnownFolder::<_, IShellItem>(&FOLDERID_AppsFolder, KF_FLAG_DEFAULT, PCWSTR(wide.as_ptr()))
+        .and_then(|item| item.GetDisplayName(SIGDN_NORMALDISPLAY))
+        .ok()
+        .map(|p| {
+            let s = p.to_string().unwrap_or_default();
+            CoTaskMemFree(Some(p.0 as _));
+            s
+        })
+        .filter(|s| !s.is_empty() && *s != id);
+    CACHE.lock().unwrap().insert(id, name.clone());
+    name
 }
 
 unsafe fn exe_path(pid: u32) -> Option<String> {
