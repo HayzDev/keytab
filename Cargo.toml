@@ -6,9 +6,6 @@ description = "Keyboard-first Alt-Tab replacement"
 license = "MIT"
 repository = "https://github.com/HayzDev/keytab"
 
-[features]
-# Accept synthetic keystrokes (Windows), so scripts/demo can record the README demo.
-demo = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

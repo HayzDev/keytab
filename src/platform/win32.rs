@@ -570,9 +570,8 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         // AltGr layouts send a fake Left Ctrl (scan code 0x21D) with Right Alt; it must not
         // count as Ctrl (which selects the current window).
         let altgr_ctrl = kb.vkCode == VK_LCONTROL.0 as u32 && kb.scanCode & 0x200 != 0;
-        // The `demo` feature (for recording the README demo) accepts scripted keystrokes.
-        let injected = !cfg!(feature = "demo") && kb.flags.0 & LLKHF_INJECTED.0 != 0;
-        if !injected && !altgr_ctrl {
+        // Injected keys count too, so AutoHotkey and similar tools can press the hotkey.
+        if !altgr_ctrl {
             let key = translate(kb.vkCode);
             // Shift always passes through: a bare Shift is harmless to the app behind, and
             // swallowing it would hide it from GetAsyncKeyState (`|` detection).

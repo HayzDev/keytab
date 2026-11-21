@@ -1,6 +1,6 @@
 # Records the README screenshots in a clean Windows Sandbox: guest.ps1 sets up sample apps,
 # then plays scene.ps1 with scripted keystrokes while ffmpeg records the screen.
-#   cargo build --release --features demo
+#   cargo build --release
 #   pwsh scripts/demo/record.ps1 [-Scene probe|demo] [-Exe path] [-FFmpeg path]
 # Needs Windows Sandbox and ffmpeg 8.1+ (for the gfxcapture source).
 # Output in target/demo/out: raw.mkv, and marks.txt with each scene step's time. The video
@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $root = Resolve-Path "$PSScriptRoot/../.."
 $work = Join-Path $root 'target/demo'
 $exe = if ($Exe) { $Exe } else { Join-Path $root 'target/release/keytab.exe' }
-if (-not (Test-Path $exe)) { throw 'Build first: cargo build --release --features demo' }
+if (-not (Test-Path $exe)) { throw 'Build first: cargo build --release' }
 $ffmpeg = if ($FFmpeg) { $FFmpeg } else { (Get-Command ffmpeg).Source }
 # Chocolatey's ffmpeg is a shim; the sandbox needs the real binary.
 $real = Join-Path (Split-Path $ffmpeg) '../lib/ffmpeg/tools/ffmpeg/bin/ffmpeg.exe'
