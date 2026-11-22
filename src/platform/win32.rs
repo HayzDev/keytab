@@ -16,6 +16,7 @@ use windows::Win32::Graphics::Dwm::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+use windows::Win32::UI::Accessibility::HWINEVENTHOOK;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -32,12 +33,26 @@ fn hwnd(id: WinId) -> HWND {
 
 // ---- windows ---------------------------------------------------------------------
 
-/// Alt-Tab-eligible windows in z-order (most recently used first). Keys unassigned.
+/// Windows in the order they were last focused since keytab started, most recent first.
+/// Z-order alone isn't recency: always-on-top windows stay above whatever you used last.
+static RECENT: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+
+unsafe extern "system" fn on_foreground(_: HWINEVENTHOOK, _: u32, h: HWND, _: i32, _: i32, _: u32, _: u32) {
+    let mut recent = RECENT.lock().unwrap();
+    recent.retain(|&x| x != h.0 as isize);
+    recent.insert(0, h.0 as isize);
+    recent.truncate(256);
+}
+
+/// Alt-Tab-eligible windows, most recently used first. Keys unassigned.
 pub fn list() -> Vec<Win> {
     let mut hwnds: Vec<HWND> = Vec::new();
     unsafe {
         let _ = EnumWindows(Some(collect), LPARAM(&mut hwnds as *mut _ as isize));
     }
+    // Windows focused since keytab started, in that order; the rest after them in z-order.
+    let recent = RECENT.lock().unwrap().clone();
+    hwnds.sort_by_key(|h| recent.iter().position(|&x| x == h.0 as isize).unwrap_or(usize::MAX));
     let me = std::process::id();
     hwnds.into_iter().filter_map(|h| unsafe { info(h, me) }).collect()
 }
@@ -611,6 +626,9 @@ pub fn start_input() {
             .expect("install keyboard hook");
         let _mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse), Some(module.into()), 0)
             .expect("install mouse hook");
+        on_foreground(HWINEVENTHOOK::default(), 0, GetForegroundWindow(), 0, 0, 0, 0);
+        use windows::Win32::UI::Accessibility::*;
+        let _fg = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT);
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
     });
